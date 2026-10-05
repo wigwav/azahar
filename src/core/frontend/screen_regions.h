@@ -103,7 +103,7 @@ public:
 private:
     Manager() = default;
 
-    bool LoadFile(const std::string& path);
+    bool LoadFile(const std::string& path, const std::string& contents);
     void Clear();
     const Profile* FindProfile(const std::string& name) const;
     const Profile* CurrentProfile() const;
@@ -117,7 +117,7 @@ private:
     // File state
     u64 title_id = 0;
     std::string file_path;
-    std::filesystem::file_time_type file_time{};
+    std::string file_contents;
     u32 frame_counter = 0;
 
     // Definition

@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <sstream>
 #include <fmt/format.h>
 #include "common/file_util.h"
@@ -67,9 +66,9 @@ void Manager::Clear() {
     auto_profile.clear();
 }
 
-bool Manager::LoadFile(const std::string& path) {
+bool Manager::LoadFile(const std::string& path, const std::string& contents) {
     Clear();
-    std::ifstream file(path);
+    std::istringstream file(contents);
     if (!file) {
         return false;
     }
@@ -249,19 +248,22 @@ void Manager::Update(Core::System& system) {
         const std::string path =
             fmt::format("{}screen_regions/{:016X}.ini",
                         FileUtil::GetUserPath(FileUtil::UserPath::LoadDir), title_id);
-        std::error_code ec;
-        const auto mtime = std::filesystem::last_write_time(path, ec);
-        if (ec) {
+        // Compare file contents rather than timestamps: robust on every platform/filesystem.
+        std::string contents;
+        const bool exists = FileUtil::Exists(path) &&
+                            FileUtil::ReadFileToString(true, path, contents) > 0;
+        if (!exists) {
             if (!file_path.empty() || title_changed) {
                 Clear();
                 file_path.clear();
+                file_contents.clear();
             }
-        } else if (title_changed || path != file_path || mtime != file_time) {
+        } else if (title_changed || path != file_path || contents != file_contents) {
             const bool keep_overlay = overlay_on && !title_changed;
             const int keep_manual = title_changed ? -1 : manual_index;
-            LoadFile(path);
+            LoadFile(path, contents);
             file_path = path;
-            file_time = mtime;
+            file_contents = std::move(contents);
             overlay_on = keep_overlay;
             manual_index =
                 keep_manual < static_cast<int>(profiles.size()) ? keep_manual : -1;
