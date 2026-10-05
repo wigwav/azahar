@@ -17,7 +17,16 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Only publish the newest commit of the branch
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          head=$(gh api repos/${{ github.repository }}/branches/single-screen --jq .commit.sha)
+          echo "branch head: $head, run sha: ${{ github.event.workflow_run.head_sha }}"
+          if [ "$head" = "${{ github.event.workflow_run.head_sha }}" ]; then echo "ok=true" >> $GITHUB_OUTPUT; else echo "ok=false" >> $GITHUB_OUTPUT; fi
       - name: Download Windows build
+        if: steps.check.outputs.ok == 'true'
         uses: actions/download-artifact@v4
         with:
           name: windows-mxe
@@ -25,6 +34,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: build
       - name: Package
+        if: steps.check.outputs.ok == 'true'
         run: |
           cd build
           ls -la
@@ -33,6 +43,7 @@ jobs:
           elif ls *.7z >/dev/null 2>&1; then cp *.7z ../azahar-single-screen-windows.7z;
           else zip -r ../azahar-single-screen-windows.zip .; fi
       - name: Publish release
+        if: steps.check.outputs.ok == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: single-screen-latest
