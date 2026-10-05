@@ -134,7 +134,11 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
         if (section == Section::Hud) {
             Element element;
             std::string error;
-            if (Hud::ParseElement(line, element, error)) {
+            if (line.rfind("let ", 0) == 0) {
+                if (!Hud::ParseLet(line, hud_defs.back(), error)) {
+                    LOG_WARNING(Frontend, "screen_regions:{}: {}", line_no, error);
+                }
+            } else if (Hud::ParseElement(line, element, error)) {
                 hud_defs.back().elements.push_back(std::move(element));
             } else {
                 LOG_WARNING(Frontend, "screen_regions:{}: {}", line_no, error);

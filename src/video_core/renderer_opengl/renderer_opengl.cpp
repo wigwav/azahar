@@ -764,7 +764,12 @@ void RendererOpenGL::ReadProbes() {
     auto& manager = ScreenRegions::Manager::Instance();
     const auto requests = probes.Requests();
     const bool capture = manager.WantsBottomCapture();
-    if (!capture && (requests.empty() || (++probe_frame & 3) != 0)) {
+    ++probe_frame;
+    std::vector<ScreenRegions::Captures::Request> grabs;
+    if ((probe_frame % 20) == 0) {
+        grabs = ScreenRegions::Captures::Instance().TakeRequests();
+    }
+    if (!capture && grabs.empty() && (requests.empty() || (probe_frame & 3) != 0)) {
         return;
     }
     const ScreenInfo& info = screen_infos[2];
@@ -810,6 +815,55 @@ void RendererOpenGL::ReadProbes() {
                 }
             }
             manager.SetBottomCapture(std::move(rgb));
+        }
+        for (const auto& g : grabs) {
+            // Copy a bottom-screen rectangle at the screen's internal resolution.
+            const float sx = static_cast<float>(tex_h) / 320.0f;
+            const float sy = static_cast<float>(tex_w) / 240.0f;
+            const u32 ow = static_cast<u32>(std::max(1.0f, g.w * sx));
+            const u32 oh = static_cast<u32>(std::max(1.0f, g.h * sy));
+            // bounding box of the source in texture pixels
+            const float s0 = tc.bottom + (tc.top - tc.bottom) * (g.y / 240.0f);
+            const float s1 = tc.bottom + (tc.top - tc.bottom) * ((g.y + g.h) / 240.0f);
+            const float t0 = tc.left + (tc.right - tc.left) * (g.x / 320.0f);
+            const float t1 = tc.left + (tc.right - tc.left) * ((g.x + g.w) / 320.0f);
+            const GLint bx0 = std::clamp(static_cast<GLint>(std::min(s0, s1) * tex_w) - 1, 0, tex_w - 1);
+            const GLint bx1 = std::clamp(static_cast<GLint>(std::max(s0, s1) * tex_w) + 1, 0, tex_w - 1);
+            const GLint by0 = std::clamp(static_cast<GLint>(std::min(t0, t1) * tex_h) - 1, 0, tex_h - 1);
+            const GLint by1 = std::clamp(static_cast<GLint>(std::max(t0, t1) * tex_h) + 1, 0, tex_h - 1);
+            const GLint bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+            std::vector<u8> box(static_cast<size_t>(bw) * bh * 4);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(bx0, by0, bw, bh, GL_RGBA, GL_UNSIGNED_BYTE, box.data());
+            ScreenRegions::Image out;
+            out.width = ow;
+            out.height = oh;
+            out.pixels.resize(static_cast<size_t>(ow) * oh * 4);
+            for (u32 yy = 0; yy < oh; ++yy) {
+                for (u32 xx = 0; xx < ow; ++xx) {
+                    const float fx = (g.x + (xx + 0.5f) / ow * g.w) / 320.0f;
+                    const float fy = (g.y + (yy + 0.5f) / oh * g.h) / 240.0f;
+                    const float sc = tc.bottom + (tc.top - tc.bottom) * fy;
+                    const float tcv = tc.left + (tc.right - tc.left) * fx;
+                    const GLint px = std::clamp(static_cast<GLint>(sc * tex_w) - bx0, 0, bw - 1);
+                    const GLint py = std::clamp(static_cast<GLint>(tcv * tex_h) - by0, 0, bh - 1);
+                    const u8* src = &box[(static_cast<size_t>(py) * bw + px) * 4];
+                    u8* dst = &out.pixels[(static_cast<size_t>(yy) * ow + xx) * 4];
+                    dst[0] = src[0];
+                    dst[1] = src[1];
+                    dst[2] = src[2];
+                    dst[3] = 255;
+                }
+            }
+            u64 sum = 1469598103934665603ULL;
+            for (size_t i = 0; i < out.pixels.size(); i += 16) {
+                sum = (sum ^ out.pixels[i]) * 1099511628211ULL;
+            }
+            auto& last = capture_sums[g.name];
+            if (last != sum) {
+                last = sum;
+                ScreenRegions::Captures::Instance().Store(g.name, std::move(out));
+            }
         }
         for (const auto& [x, y] : requests) {
             const float fx = (static_cast<float>(x) + 0.5f) / 320.0f;

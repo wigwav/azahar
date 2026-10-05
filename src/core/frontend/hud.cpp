@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <sstream>
 #include <fmt/format.h>
@@ -57,6 +58,16 @@ u32 ParseColor(const std::string& s) {
 
 /// u16:0x08001234   u32:[0x00500000]+0x20   u8:[[0x00500000]+4]+0x1C   or plain number
 bool ParseBinding(const std::string& in, Binding& b) {
+    if (!in.empty() && in[0] == '=') {
+        std::string error;
+        b.constant = false;
+        b.is_expr = true;
+        if (!b.node.Parse(in.substr(1), error)) {
+            LOG_WARNING(Frontend, "HUD expression '{}': {}", in.substr(1), error);
+            return false;
+        }
+        return true;
+    }
     std::string s = in;
     const auto cmp = s.find_first_of("<>=!&");
     if (cmp != std::string::npos && cmp > 0) {
@@ -122,6 +133,49 @@ bool EvalExpr(const std::string& e, size_t& pos, Core::System& system,
 
 } // Anonymous namespace
 
+Captures& Captures::Instance() {
+    static Captures instance;
+    return instance;
+}
+
+void Captures::Ask(const std::string& name, float x, float y, float w, float h) {
+    std::scoped_lock lock{mutex};
+    pending[name] = Request{name, x, y, w, h};
+}
+
+std::vector<Captures::Request> Captures::TakeRequests() {
+    std::scoped_lock lock{mutex};
+    std::vector<Request> out;
+    for (auto& [name, r] : pending) {
+        out.push_back(r);
+    }
+    pending.clear();
+    return out;
+}
+
+void Captures::Store(const std::string& name, Image image) {
+    std::scoped_lock lock{mutex};
+    store[name] = {std::make_shared<const Image>(std::move(image)), ++counter};
+}
+
+std::shared_ptr<const Image> Captures::Get(const std::string& name) const {
+    std::scoped_lock lock{mutex};
+    const auto it = store.find(name);
+    return it == store.end() ? nullptr : it->second.first;
+}
+
+u64 Captures::Version(const std::string& name) const {
+    std::scoped_lock lock{mutex};
+    const auto it = store.find(name);
+    return it == store.end() ? 0 : it->second.second;
+}
+
+void Captures::Clear() {
+    std::scoped_lock lock{mutex};
+    pending.clear();
+    store.clear();
+}
+
 Probes& Probes::Instance() {
     static Probes instance;
     return instance;
@@ -153,10 +207,28 @@ u32 Probes::Get(u32 x, u32 y) const {
 }
 
 static s64 ReadRaw(const Binding& b, Core::System& system);
+namespace {
+std::string Format(const std::string& tmpl, const std::vector<Value>& values);
+}
+
+Value Binding::Eval(const Expr::Context& ctx) const {
+    if (is_expr) {
+        return node.Eval(ctx);
+    }
+    return Value(Read(ctx.system));
+}
 
 s64 Binding::Read(Core::System& system) const {
     s64 v = 0;
-    if (probe) {
+    if (is_expr) {
+        static const std::map<std::string, Value> no_vars;
+        static const std::vector<std::string> no_lines;
+        Expr::Context ctx{system, no_vars,
+                          [](const std::string&) -> const std::vector<std::string>& {
+                              return no_lines;
+                          }};
+        v = node.Eval(ctx).n;
+    } else if (probe) {
         const u32 rgb = Probes::Instance().Get(probe_x, probe_y);
         const s64 r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
         v = probe_mode == 1 ? g - std::max(r, bl) : (r * 299 + g * 587 + bl * 114) / 1000;
@@ -224,6 +296,24 @@ bool Hud::ParseValue(const std::string& text, Binding& out) {
     }
 }
 
+bool Hud::ParseLet(const std::string& line, HudDef& def, std::string& error) {
+    const auto eq = line.find('=');
+    if (line.rfind("let ", 0) != 0 || eq == std::string::npos) {
+        error = "expected let name = expression";
+        return false;
+    }
+    std::string name = line.substr(4, eq - 4);
+    name.erase(std::remove_if(name.begin(), name.end(),
+                              [](unsigned char c) { return std::isspace(c); }),
+               name.end());
+    Expr expr;
+    if (!expr.Parse(line.substr(eq + 1), error)) {
+        return false;
+    }
+    def.lets.emplace_back(name, std::move(expr));
+    return true;
+}
+
 bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) {
     try {
         auto t = Tokenize(line);
@@ -250,6 +340,11 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             e.align = a == "center" ? 1 : a == "right" ? 2 : 0;
             const std::string q = t.at(i++);
             e.text = q[0] == '"' ? q.substr(1) : q;
+        } else if (kind == "capture") {
+            e.type = Element::Type::Capture;
+            const std::string q = t.at(i++);
+            e.image = q[0] == '"' ? q.substr(1) : q;
+            e.x = num(); e.y = num(); e.w = num(); e.h = num();
         } else if (kind == "bar") {
             e.type = Element::Type::Bar;
             e.x = num(); e.y = num(); e.w = num(); e.h = num();
@@ -268,6 +363,14 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             const std::string v = t[i].substr(eq + 1);
             if (k == "names" || k == "lookup") {
                 e.lookup = v;
+            } else if (k == "ox" || k == "oy") {
+                if (!ParseBinding(v, k == "ox" ? e.ox : e.oy)) {
+                    error = "bad binding '" + v + "'";
+                    return false;
+                }
+                e.has_offset = true;
+            } else if (k == "fit") {
+                e.fit = std::stof(v);
             } else if (k == "opacity") {
                 e.opacity = std::clamp(std::stof(v), 0.0f, 1.0f);
             } else if (k == "v" || k == "value" || k == "max") {
@@ -402,29 +505,81 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         return false;
     }
 
-    std::vector<std::vector<s64>> values(def->elements.size());
+    std::map<std::string, Value> vars;
+    Expr::Context ctx{system, vars,
+                      [this](const std::string& file) -> const std::vector<std::string>& {
+                          return GetLookup(file);
+                      }};
+    for (const auto& [name, expr] : def->lets) {
+        vars[name] = expr.Eval(ctx);
+    }
+    std::vector<std::vector<Value>> values(def->elements.size());
     std::vector<bool> visible(def->elements.size());
+    offsets.assign(def->elements.size(), {0.0f, 0.0f});
     for (size_t i = 0; i < def->elements.size(); ++i) {
         const auto& e = def->elements[i];
         const bool can_hold = active_profile == last_profile && i < last_visible.size();
-        if (can_hold && e.hold.Read(system) != 0) {
+        if (can_hold && e.hold.Eval(ctx).Truthy()) {
             visible[i] = last_visible[i];
         } else {
-            visible[i] = e.visible.Read(system) != 0 &&
-                         (e.visible2.constant ? true : e.visible2.Read(system) != 0);
+            visible[i] = e.visible.Eval(ctx).Truthy() &&
+                         (e.visible2.constant ? true : e.visible2.Eval(ctx).Truthy());
+        }
+        if (!visible[i]) {
+            continue;
+        }
+        if (e.has_offset) {
+            offsets[i] = {static_cast<float>(e.ox.Eval(ctx).n), static_cast<float>(e.oy.Eval(ctx).n)};
         }
         for (const auto& b : e.values) {
-            values[i].push_back(b.Read(system));
+            values[i].push_back(b.Eval(ctx));
+        }
+        if (e.type == Element::Type::Capture) {
+            Captures::Instance().Ask(Format(e.image, values[i]), e.x, e.y, e.w, e.h);
+            values[i].clear(); // requests don't change the canvas by themselves
+        } else if (e.type == Element::Type::Image && !e.image.empty() && e.image[0] == '@') {
+            const std::string name = Format(e.image.substr(1), values[i]);
+            values[i].push_back(Value(static_cast<s64>(Captures::Instance().Version(name))));
+            PersistCapture(name);
         }
     }
-    if (active_profile == last_profile && values == last_values && visible == last_visible) {
+    if (active_profile == last_profile && values == last_values && visible == last_visible &&
+        offsets == last_offsets) {
         return false;
     }
+    last_offsets = offsets;
     last_profile = active_profile;
     last_values = values;
     last_visible = visible;
     Rasterise(*def, values, visible);
     return true;
+}
+
+void Hud::PersistCapture(const std::string& name) {
+    const u64 version = Captures::Instance().Version(name);
+    if (version == 0) {
+        return;
+    }
+    auto& st = cache_state[name];
+    if (st.version != version) {
+        st = {version, 0, false};
+        return;
+    }
+    // save once the capture has been stable for a while (skips mid-animation frames)
+    if (st.saved || ++st.seen < 90) {
+        return;
+    }
+    st.saved = true;
+    const auto cap = Captures::Instance().Get(name);
+    if (!cap || !cap->width) {
+        return;
+    }
+    const std::string dir = asset_dir + "cache/";
+    FileUtil::CreateFullPath(dir);
+    Frontend::ImageInterface encoder;
+    if (encoder.EncodePNG(dir + name + ".png", cap->width, cap->height, cap->pixels)) {
+        images.erase("cache/" + name + ".png");
+    }
 }
 
 std::shared_ptr<const Image> Hud::Canvas(u64& version) const {
@@ -433,7 +588,23 @@ std::shared_ptr<const Image> Hud::Canvas(u64& version) const {
     return canvas;
 }
 
-void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<s64>>& values,
+namespace {
+std::string Format(const std::string& tmpl, const std::vector<Value>& values) {
+    std::string s = tmpl;
+    for (size_t v = 0; v < values.size(); ++v) {
+        const std::string key = "{" + std::to_string(v) + "}";
+        const std::string repl = values[v].Text();
+        size_t p = 0;
+        while ((p = s.find(key, p)) != std::string::npos) {
+            s.replace(p, key.size(), repl);
+            p += repl.size();
+        }
+    }
+    return s;
+}
+} // namespace
+
+void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
                     const std::vector<bool>& visible) {
     auto img = std::make_shared<Image>();
     img->width = CanvasWidth;
@@ -441,46 +612,70 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<s64>>& valu
     img->pixels.assign(static_cast<size_t>(CanvasWidth) * CanvasHeight * 4, 0);
 
     for (size_t i = 0; i < def.elements.size(); ++i) {
-        const auto& e = def.elements[i];
         if (!visible[i]) {
             continue;
+        }
+        Element e = def.elements[i];
+        if (i < offsets.size()) {
+            e.x += offsets[i].first;
+            e.y += offsets[i].second;
         }
         switch (e.type) {
         case Element::Type::Rect:
             DrawRect(*img, e.x, e.y, e.w, e.h, e.color, e.opacity);
             break;
-        case Element::Type::Image:
-            if (const Image* src = GetImage(e.image)) {
+        case Element::Type::Image: {
+            if (!e.image.empty() && e.image[0] == '@') {
+                const std::string name = Format(e.image.substr(1), values[i]);
+                const auto cap = Captures::Instance().Get(name);
+                if (cap && cap->width) {
+                    DrawImage(*img, *cap, e.x, e.y, e.w, e.h, e.opacity);
+                } else if (const Image* disk = GetImage("cache/" + name + ".png")) {
+                    // captured in an earlier session
+                    DrawImage(*img, *disk, e.x, e.y, e.w, e.h, e.opacity);
+                }
+                break;
+            }
+            const std::string file =
+                e.image.find('{') != std::string::npos ? Format(e.image, values[i]) : e.image;
+            if (const Image* src = GetImage(file)) {
                 DrawImage(*img, *src, e.x, e.y, e.w, e.h, e.opacity);
             }
             break;
+        }
+        case Element::Type::Capture:
+            break;
         case Element::Type::Bar: {
             DrawRect(*img, e.x, e.y, e.w, e.h, e.color2, e.opacity);
-            if (values[i].size() >= 2 && values[i][1] > 0) {
-                const float f = std::clamp(static_cast<float>(values[i][0]) /
-                                               static_cast<float>(values[i][1]),
+            if (values[i].size() >= 2 && values[i][1].n > 0) {
+                const float f = std::clamp(static_cast<float>(values[i][0].n) /
+                                               static_cast<float>(values[i][1].n),
                                            0.0f, 1.0f);
                 DrawRect(*img, e.x, e.y, e.w * f, e.h, e.color, e.opacity);
             }
             break;
         }
         case Element::Type::Text: {
-            std::string s = e.text;
-            for (size_t v = 0; v < values[i].size(); ++v) {
-                const std::string key = "{" + std::to_string(v) + "}";
-                std::string repl = std::to_string(values[i][v]);
-                if (v == 0 && !e.lookup.empty()) {
-                    const auto& list = GetLookup(e.lookup);
-                    const s64 idx = values[i][v];
-                    repl = idx >= 0 && idx < static_cast<s64>(list.size()) ? list[idx] : "";
-                }
-                size_t p;
-                while ((p = s.find(key)) != std::string::npos) {
-                    s.replace(p, key.size(), repl);
+            std::vector<Value> vals = values[i];
+            if (!vals.empty() && !e.lookup.empty() && !vals[0].is_str) {
+                const auto& list = GetLookup(e.lookup);
+                const s64 idx = vals[0].n;
+                vals[0] = Value(idx >= 0 && idx < static_cast<s64>(list.size())
+                                    ? list[static_cast<size_t>(idx)]
+                                    : std::string{});
+            }
+            const std::string s = Format(e.text, vals);
+            float size = e.size;
+            if (e.fit > 0 && LoadFont()) {
+                const float w = TextWidth(s, size);
+                if (w > e.fit) {
+                    size *= e.fit / w;
                 }
             }
             if (LoadFont()) {
-                DrawText(*img, s, e.x, e.y, e.size, e.align, e.color, e.opacity);
+                // keep the baseline when shrinking to fit
+                const float dy = (e.size - size) * 0.8f;
+                DrawText(*img, s, e.x, e.y + dy, size, e.align, e.color, e.opacity);
             }
             break;
         }
@@ -544,6 +739,18 @@ void Hud::DrawImage(Image& dst, const Image& src, float x, float y, float w, flo
             Blend(d, c[0], c[1], c[2], (c[3] / 255.0f) * opacity);
         }
     }
+}
+
+float Hud::TextWidth(const std::string& text, float size) {
+    const float scale = size / static_cast<float>(font_line);
+    float width = 0;
+    for (unsigned char ch : text) {
+        auto it = glyphs.find(ch);
+        if (it != glyphs.end()) {
+            width += it->second.advance * scale;
+        }
+    }
+    return width;
 }
 
 void Hud::DrawText(Image& dst, const std::string& text, float x, float y, float size, int align,

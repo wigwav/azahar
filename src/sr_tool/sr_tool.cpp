@@ -28,7 +28,9 @@
 #include "core/arm/arm_interface.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
+#include "core/frontend/hud.h"
 #include "core/frontend/input.h"
+#include <fstream>
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/process.h"
 #include "core/hle/kernel/vm_manager.h"
@@ -203,6 +205,90 @@ void Dump(Core::System& system, const std::string& path) {
     std::fflush(stdout);
 }
 
+
+void ServiceCaptures(Core::System& system) {
+    auto* sw = dynamic_cast<SwRenderer::RendererSoftware*>(&system.GPU().Renderer());
+    if (!sw) {
+        return;
+    }
+    const auto& info = sw->Screen(VideoCore::ScreenId::Bottom);
+    for (const auto& r : ScreenRegions::Captures::Instance().TakeRequests()) {
+        ScreenRegions::Image img;
+        img.width = static_cast<u32>(r.w);
+        img.height = static_cast<u32>(r.h);
+        img.pixels.resize(static_cast<size_t>(img.width) * img.height * 4);
+        for (u32 y = 0; y < img.height; ++y) {
+            for (u32 x = 0; x < img.width; ++x) {
+                const u32 sx = static_cast<u32>(r.x) + x, sy = static_cast<u32>(r.y) + y;
+                const size_t src = (static_cast<size_t>(sy) * info.height + sx) * 4;
+                u8* d = &img.pixels[(static_cast<size_t>(y) * img.width + x) * 4];
+                if (src + 3 < info.pixels.size()) {
+                    d[0] = info.pixels[src];
+                    d[1] = info.pixels[src + 1];
+                    d[2] = info.pixels[src + 2];
+                }
+                d[3] = 255;
+            }
+        }
+        ScreenRegions::Captures::Instance().Store(r.name, std::move(img));
+    }
+}
+
+/// hud <ini> <assets_dir> <hud_name> <out.rgba>: render a [hud NAME] section over the current state
+void RenderHud(Core::System& system, const std::string& ini, const std::string& assets,
+               const std::string& name, const std::string& out) {
+    std::ifstream in(ini);
+    std::string line;
+    bool inside = false;
+    ScreenRegions::HudDef def;
+    def.name = name;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const auto first = line.find_first_not_of(" \t");
+        if (first == std::string::npos) {
+            continue;
+        }
+        line = line.substr(first);
+        if (line[0] == '#' || line[0] == ';') {
+            continue;
+        }
+        if (line[0] == '[') {
+            inside = line == "[hud " + name + "]";
+            continue;
+        }
+        if (!inside) {
+            continue;
+        }
+        std::string error;
+        if (line.rfind("let ", 0) == 0) {
+            if (!ScreenRegions::Hud::ParseLet(line, def, error)) {
+                std::fprintf(stderr, "let error: %s: %s\n", line.c_str(), error.c_str());
+            }
+            continue;
+        }
+        ScreenRegions::Element e;
+        if (ScreenRegions::Hud::ParseElement(line, e, error)) {
+            def.elements.push_back(std::move(e));
+        } else {
+            std::fprintf(stderr, "element error: %s: %s\n", line.c_str(), error.c_str());
+        }
+    }
+    static ScreenRegions::Hud hud;
+    hud.SetDefinition({def}, assets + "/");
+    hud.Update(system, name);
+    ServiceCaptures(system);
+    hud.Update(system, name);
+    u64 version = 0;
+    const auto canvas = hud.Canvas(version);
+    FileUtil::IOFile f(out, "wb");
+    if (canvas) {
+        f.WriteBytes(canvas->pixels.data(), canvas->pixels.size());
+    }
+    std::printf("hud %zu elements -> %s\n", def.elements.size(), out.c_str());
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -323,6 +409,10 @@ int main(int argc, char** argv) {
                 FileUtil::ReadFileToString(false, path, data);
                 system.Memory().WriteBlock(addr, data.data(), data.size());
                 std::printf("wrote %zu bytes at %08x\n", data.size(), addr);
+            } else if (cmd == "hud") {
+                std::string ini, assets, name, out;
+                in >> ini >> assets >> name >> out;
+                RenderHud(system, ini, assets, name, out);
             } else if (cmd == "quit") {
                 break;
             } else {

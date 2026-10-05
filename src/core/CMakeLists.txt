@@ -122,6 +122,8 @@ add_library(citra_core STATIC EXCLUDE_FROM_ALL
     frontend/framebuffer_layout.cpp
     frontend/framebuffer_layout.h
     frontend/hud.cpp
+    frontend/hud_expr.cpp
+    frontend/hud_expr.h
     frontend/hud.h
     frontend/screen_regions.cpp
     frontend/screen_regions.h

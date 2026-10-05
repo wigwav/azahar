@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <string>
+#include <unordered_map>
+
 #include <array>
 #include "video_core/renderer_base.h"
 #include "video_core/renderer_opengl/frame_dumper_opengl.h"
@@ -99,6 +102,7 @@ private:
     OGLTexture hud_texture;
     OGLFramebuffer probe_fbo;
     u32 probe_frame = 0;
+    std::unordered_map<std::string, u64> capture_sums;
     u64 hud_version = ~0ULL;
 
     // Display information for top and bottom screens respectively

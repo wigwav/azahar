@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include "common/common_types.h"
+#include "core/frontend/hud_expr.h"
 
 namespace Core {
 class System;
@@ -47,6 +48,30 @@ private:
     std::map<u32, u32> values; ///< key = y << 16 | x
 };
 
+/// Bottom-screen captures: the HUD asks for a rectangle of the live bottom screen to be kept
+/// under a name (e.g. a party member's portrait while it is fully visible); the renderer
+/// copies it at display resolution. Images named "@name" in the HUD draw the latest copy.
+class Captures {
+public:
+    struct Request {
+        std::string name;
+        float x, y, w, h; ///< bottom-screen pixels (320x240)
+    };
+    static Captures& Instance();
+    void Ask(const std::string& name, float x, float y, float w, float h);
+    std::vector<Request> TakeRequests();
+    void Store(const std::string& name, Image image);
+    std::shared_ptr<const Image> Get(const std::string& name) const;
+    u64 Version(const std::string& name) const;
+    void Clear();
+
+private:
+    mutable std::mutex mutex;
+    std::map<std::string, Request> pending;
+    std::map<std::string, std::pair<std::shared_ptr<const Image>, u64>> store;
+    u64 counter = 0;
+};
+
 /// Value source: a constant, a guest memory read (optionally through a pointer chain),
 /// or a bottom-screen pixel probe ("pix:X,Y"). An optional "<N" / ">N" suffix turns the
 /// value into a 0/1 comparison result.
@@ -60,11 +85,14 @@ struct Binding {
     s64 cmp_value = 0;
     std::string expr;             ///< address expression, e.g. "[0x00500000]+0x20"
     u32 size = 2;                 ///< 1, 2 or 4 bytes for the final read
+    bool is_expr = false;         ///< "=EXPR": full expression (see hud_expr.h)
+    Expr node;
     s64 Read(Core::System& system) const;
+    Value Eval(const Expr::Context& ctx) const;
 };
 
 struct Element {
-    enum class Type { Rect, Image, Text, Bar } type = Type::Rect;
+    enum class Type { Rect, Image, Text, Bar, Capture } type = Type::Rect;
     float x = 0, y = 0, w = 0, h = 0;
     u32 color = 0xFFFFFFFF;     ///< RRGGBBAA
     u32 color2 = 0x000000A0;    ///< bar background
@@ -78,17 +106,24 @@ struct Element {
     Binding visible2;           ///< optional second condition ("and=")
     Binding hold;               ///< while non-zero, keep the previous visibility ("hold=")
     std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
+    float fit = 0;              ///< Text: shrink to fit this width (0 = off)
+    Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
+    bool has_offset = false;
 };
 
 struct HudDef {
     std::string name;           ///< profile this HUD belongs to
     std::vector<Element> elements;
+    std::vector<std::pair<std::string, Expr>> lets; ///< "let name = EXPR", evaluated in order
 };
 
 class Hud {
 public:
     /// Parses one "hud = ..." element line; returns false on syntax error.
     static bool ParseElement(const std::string& line, Element& out, std::string& error);
+
+    /// Parses "let name = EXPR" into `def`; returns false on syntax error.
+    static bool ParseLet(const std::string& line, HudDef& def, std::string& error);
 
     /// Parses a value binding ("u32:[0x500000]+4", "pix:10,4<50", "1", ...).
     static bool ParseValue(const std::string& text, Binding& out);
@@ -111,13 +146,14 @@ private:
     };
     bool LoadFont();
     const Image* GetImage(const std::string& file);
-    void Rasterise(const HudDef& def, const std::vector<std::vector<s64>>& values,
+    void Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
                    const std::vector<bool>& visible);
     void DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, float opacity);
     void DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
                    float opacity);
     void DrawText(Image& dst, const std::string& text, float x, float y, float size, int align,
                   u32 rgba, float opacity);
+    float TextWidth(const std::string& text, float size);
 
     std::vector<HudDef> defs;
     std::string asset_dir;
@@ -130,8 +166,18 @@ private:
     bool font_loaded = false;
 
     std::string last_profile;
-    std::vector<std::vector<s64>> last_values;
+    std::vector<std::vector<Value>> last_values;
+    std::vector<std::pair<float, float>> offsets;
+    std::vector<std::pair<float, float>> last_offsets;
     std::vector<bool> last_visible;
+    /// Captures persisted to <asset_dir>/cache once stable: name -> (version, updates seen, saved)
+    struct CacheState {
+        u64 version = 0;
+        int seen = 0;
+        bool saved = false;
+    };
+    std::map<std::string, CacheState> cache_state;
+    void PersistCapture(const std::string& name);
 
     mutable std::mutex canvas_mutex;
     std::shared_ptr<Image> canvas;
