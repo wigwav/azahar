@@ -11,6 +11,7 @@
 //   w8|w16|w32 <addr> <v>  poke guest memory
 //   quit
 
+#include <cstring>
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>
@@ -206,6 +207,7 @@ void Dump(Core::System& system, const std::string& path) {
 }
 
 
+std::string g_rec_bottom; // 320x240 RGB from a loaded recording
 void ServiceCaptures(Core::System& system) {
     auto* sw = dynamic_cast<SwRenderer::RendererSoftware*>(&system.GPU().Renderer());
     if (!sw) {
@@ -277,6 +279,26 @@ void RenderHud(Core::System& system, const std::string& ini, const std::string& 
     }
     static ScreenRegions::Hud hud;
     hud.SetDefinition({def}, assets + "/");
+    hud.Update(system, name);
+    {
+        // answer pixel probes from the recording (or the software bottom screen)
+        auto* sw = dynamic_cast<SwRenderer::RendererSoftware*>(&system.GPU().Renderer());
+        for (const auto& [x, y] : ScreenRegions::Probes::Instance().Requests()) {
+            u32 rgb = 0;
+            if (g_rec_bottom.size() >= 320 * 240 * 3) {
+                const u8* q = reinterpret_cast<const u8*>(g_rec_bottom.data()) + (y * 320 + x) * 3;
+                rgb = (u32{q[0]} << 16) | (u32{q[1]} << 8) | q[2];
+            } else if (sw) {
+                const auto& info = sw->Screen(VideoCore::ScreenId::Bottom);
+                const size_t src = (static_cast<size_t>(y) * info.height + x) * 4;
+                if (src + 2 < info.pixels.size()) {
+                    rgb = (u32{info.pixels[src]} << 16) | (u32{info.pixels[src + 1]} << 8) |
+                          info.pixels[src + 2];
+                }
+            }
+            ScreenRegions::Probes::Instance().Set(x, y, rgb);
+        }
+    }
     hud.Update(system, name);
     ServiceCaptures(system);
     hud.Update(system, name);
@@ -409,6 +431,28 @@ int main(int argc, char** argv) {
                 FileUtil::ReadFileToString(false, path, data);
                 system.Memory().WriteBlock(addr, data.data(), data.size());
                 std::printf("wrote %zu bytes at %08x\n", data.size(), addr);
+            } else if (cmd == "wrec") {
+                // wrec <raw recording>: an uncompressed SRREC1 file; writes its memory ranges
+                std::string path;
+                in >> path;
+                std::string d;
+                FileUtil::ReadFileToString(false, path, d);
+                size_t p = 28;
+                auto rd = [&](size_t at) {
+                    u32 v;
+                    std::memcpy(&v, d.data() + at, 4);
+                    return v;
+                };
+                const u32 n = rd(p);
+                p += 4;
+                for (u32 i = 0; i < n; ++i) {
+                    const u32 va = rd(p), size = rd(p + 4);
+                    p += 8;
+                    system.Memory().WriteBlock(va, d.data() + p, size);
+                    p += size;
+                }
+                g_rec_bottom.assign(d.begin() + p + 8, d.end());
+                std::printf("recording loaded (%u ranges)\n", n);
             } else if (cmd == "hud") {
                 std::string ini, assets, name, out;
                 in >> ini >> assets >> name >> out;

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -105,6 +106,7 @@ struct Element {
     Binding visible;            ///< element shown when non-zero (constant 1 by default)
     Binding visible2;           ///< optional second condition ("and=")
     Binding hold;               ///< while non-zero, keep the previous visibility ("hold=")
+    int linger = 0;             ///< ms an element stays up after its condition drops ("linger=")
     std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
     float fit = 0;              ///< Text: shrink to fit this width (0 = off)
     Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
@@ -170,6 +172,7 @@ private:
     std::vector<std::pair<float, float>> offsets;
     std::vector<std::pair<float, float>> last_offsets;
     std::vector<bool> last_visible;
+    std::vector<std::chrono::steady_clock::time_point> last_true;
     /// Captures persisted to <asset_dir>/cache once stable: name -> (version, updates seen, saved)
     struct CacheState {
         u64 version = 0;

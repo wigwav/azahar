@@ -390,6 +390,8 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
                     error = "bad binding '" + v + "'";
                     return false;
                 }
+            } else if (k == "linger") {
+                e.linger = std::stoi(v);
             } else if (k == "hold") {
                 if (!ParseBinding(v, e.hold)) {
                     error = "bad binding '" + v + "'";
@@ -524,6 +526,16 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         } else {
             visible[i] = e.visible.Eval(ctx).Truthy() &&
                          (e.visible2.constant ? true : e.visible2.Eval(ctx).Truthy());
+        }
+        if (last_true.size() != def->elements.size()) {
+            last_true.assign(def->elements.size(), {});
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (visible[i]) {
+            last_true[i] = now;
+        } else if (e.linger > 0 && last_true[i].time_since_epoch().count() != 0 &&
+                   now - last_true[i] < std::chrono::milliseconds(e.linger)) {
+            visible[i] = true; // bridge short drops (state changes between menus)
         }
         if (!visible[i]) {
             continue;

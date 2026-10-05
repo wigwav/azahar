@@ -3,11 +3,14 @@
 // Refer to the license.txt file included.
 
 #include <chrono>
+#include <map>
+#include <mutex>
 #include <algorithm>
 #include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include "core/core.h"
+#include "core/frontend/hud.h"
 #include "core/frontend/hud_expr.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/process.h"
@@ -633,6 +636,29 @@ Value Call(const ExprNode& n, const Env& env) {
         return Value(i >= 0 && i < static_cast<s64>(lines.size()) ? lines[static_cast<size_t>(i)] : std::string{});
     }
     if (f == "field") return Value(env.Field(argv(0).Text(), arg(1), static_cast<int>(arg(2))));
+    if (f == "recent") {
+        // true while arg0 is true and for arg1 ms after it last was (smooths brief state flips)
+        static std::mutex m;
+        static std::map<const ExprNode*, std::chrono::steady_clock::time_point> seen;
+        const auto now = std::chrono::steady_clock::now();
+        const bool v = argv(0).Truthy();
+        std::scoped_lock lock{m};
+        if (v) {
+            seen[&n] = now;
+            return 1;
+        }
+        const auto it = seen.find(&n);
+        return static_cast<s64>(it != seen.end() &&
+                                now - it->second < std::chrono::milliseconds(arg(1)));
+    }
+    if (f == "has") return static_cast<s64>(argv(0).Text().find(argv(1).Text()) != std::string::npos);
+    if (f == "pix") {
+        // bottom-screen pixel 0xRRGGBB (sampled by the renderer)
+        const u32 x = static_cast<u32>(std::clamp<s64>(arg(0), 0, 319));
+        const u32 y = static_cast<u32>(std::clamp<s64>(arg(1), 0, 239));
+        Probes::Instance().Request(x, y);
+        return static_cast<s64>(Probes::Instance().Get(x, y));
+    }
     if (f == "len") return static_cast<s64>(argv(0).Text().size());
     // --- SMT4A -------------------------------------------------------------------------------
     if (f == "smt4a_save") return Smt4a::Save(env);
