@@ -12,6 +12,7 @@
 //   quit
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -24,6 +25,7 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/arm/arm_interface.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
 #include "core/frontend/input.h"
@@ -214,7 +216,7 @@ int main(int argc, char** argv) {
     FileUtil::SetUserPath(std::string(argv[1]) + "/");
 
     Settings::values.graphics_api = Settings::GraphicsAPI::Software;
-    Settings::values.use_cpu_jit = true;
+    Settings::values.use_cpu_jit = std::getenv("SR_INTERP") == nullptr;
     Settings::values.frame_limit = 0;
     Settings::values.audio_emulation = Settings::AudioEmulation::HLE;
     Input::RegisterFactory<Input::ButtonDevice>("sr", std::make_shared<ScriptButtonFactory>());
@@ -295,6 +297,23 @@ int main(int argc, char** argv) {
                     m.Write16(addr, static_cast<u16>(val));
                 else
                     m.Write32(addr, val);
+            } else if (cmd == "watch") {
+                // watch <addr> <size>: log PC/LR of every read/write in [addr, addr+size)
+                std::string a, n;
+                in >> a >> n;
+                const u32 lo = static_cast<u32>(std::stoul(a, nullptr, 0));
+                const u32 hi = lo + static_cast<u32>(std::stoul(n, nullptr, 0));
+                system.Memory().RegisterWatchpoint(*system.Kernel().GetCurrentProcess(), lo,
+                                                   hi - lo);
+                Memory::g_watch_hook = [&system, lo, hi](u32 addr, u32 size, bool write) {
+                    if (addr + size <= lo || addr >= hi) {
+                        return;
+                    }
+                    auto& core = system.GetRunningCore();
+                    std::fprintf(stderr, "WATCH %c %08x %u pc=%08x lr=%08x r0=%08x r1=%08x\n",
+                                 write ? 'W' : 'R', addr, size, core.GetPC(), core.GetReg(14),
+                                 core.GetReg(0), core.GetReg(1));
+                };
             } else if (cmd == "wfile") {
                 // wfile <addr> <path>: copy a host file into guest memory
                 std::string a, path;

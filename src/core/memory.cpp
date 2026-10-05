@@ -44,6 +44,9 @@ constexpr u32 SIGSEGV = 11;
 
 namespace Memory {
 
+std::function<void(u32, u32, bool)> g_watch_hook;
+
+
 void PageTable::Clear() {
     pointers.raw.fill(nullptr);
     pointers.refs.fill(MemoryRef());
@@ -641,6 +644,9 @@ T MemorySystem::Read(const std::shared_ptr<PageTable>& page_table, const VAddr v
 
         ReadType value;
         std::memcpy(&value, it->second.memory.GetPtr() + (vaddr & CITRA_PAGE_MASK), read_size);
+        if (g_watch_hook) {
+            g_watch_hook(vaddr, static_cast<u32>(read_size), false);
+        }
 
 #ifdef ENABLE_GDBSTUB
         if (GDBStub::CheckBreakpoint(vaddr, read_size, GDBStub::BreakpointType::Read)) {
@@ -729,6 +735,9 @@ void MemorySystem::Write(const std::shared_ptr<PageTable>& page_table, const VAd
                    "Missing memory for watchpoint page");
 
         std::memcpy(it->second.memory.GetPtr() + (vaddr & CITRA_PAGE_MASK), &data, sizeof(T));
+        if (g_watch_hook) {
+            g_watch_hook(vaddr, static_cast<u32>(sizeof(T)), true);
+        }
 
 #ifdef ENABLE_GDBSTUB
         if (GDBStub::CheckBreakpoint(vaddr, sizeof(T), GDBStub::BreakpointType::Write)) {

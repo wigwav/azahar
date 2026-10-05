@@ -3,6 +3,8 @@
 // Refer to the misc/licenses/gplv2.txt file included.
 
 #pragma once
+
+#include <functional>
 #include <array>
 #include <cstddef>
 #include <optional>
@@ -26,6 +28,10 @@ class DspInterface;
 }
 
 namespace Memory {
+
+/// Optional observer for accesses to watchpoint pages (research tools): (addr, size, is_write).
+extern std::function<void(u32, u32, bool)> g_watch_hook;
+
 
 /**
  * Page size used by the ARM architecture. This is the smallest granularity with which memory can
