@@ -13,6 +13,7 @@
 #include "core/frontend/screen_regions.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/process.h"
+#include "core/hle/kernel/vm_manager.h"
 #include "core/memory.h"
 
 namespace ScreenRegions {
@@ -242,6 +243,22 @@ void Manager::Update(Core::System& system) {
     const bool title_changed = current_title != title_id;
     const bool check_file = title_changed || reload_requested.exchange(false) ||
                             (++frame_counter % 60) == 0;
+
+    if (title_changed) {
+        // Log the process memory map (virtual -> FCRAM offset) once per title. Used to
+        // translate addresses found in save-state snapshots into game addresses.
+        const u8* fcram = system.Memory().GetFCRAMPointer(0);
+        for (const auto& [vaddr, vma] : process->vm_manager.vma_map) {
+            if (vma.type != Kernel::VMAType::BackingMemory) {
+                continue;
+            }
+            const u8* ptr = vma.backing_memory.GetPtr();
+            if (ptr >= fcram && ptr < fcram + Memory::FCRAM_N3DS_SIZE) {
+                LOG_INFO(Frontend, "ScreenRegions memmap: va={:08X} size={:08X} fcram={:08X}",
+                         vma.base, vma.size, static_cast<u32>(ptr - fcram));
+            }
+        }
+    }
 
     if (check_file) {
         title_id = current_title;
