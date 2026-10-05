@@ -6,7 +6,10 @@
 #include <cctype>
 #include <sstream>
 #include <fmt/format.h>
+#include <chrono>
+#include <thread>
 #include "common/file_util.h"
+#include "common/zstd_compression.h"
 #include "common/logging/log.h"
 #include "core/core.h"
 #include "core/frontend/framebuffer_layout.h"
@@ -60,6 +63,8 @@ void Manager::Clear() {
     canvas_h = 1080.0f;
     default_profile.clear();
     overlay_profile.clear();
+    record_profiles.clear();
+    record_max = 0;
     profiles.clear();
     rules.clear();
     hud_defs.clear();
@@ -158,6 +163,18 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
                     default_profile = value;
                 } else if (key == "overlay_profile" || key == "toggle_profile") {
                     overlay_profile = value;
+                } else if (key == "record") {
+                    std::istringstream in(value);
+                    std::string names;
+                    in >> names >> record_interval >> record_max;
+                    record_profiles.clear();
+                    std::istringstream ns(names);
+                    for (std::string n; std::getline(ns, n, ',');) {
+                        if (!Trim(n).empty()) {
+                            record_profiles.push_back(Trim(n));
+                        }
+                    }
+                    record_interval = std::max<u32>(record_interval, 10);
                 }
             } else if (section == Section::Profile && current) {
                 if (key == "hide_bottom") {
@@ -380,12 +397,105 @@ void Manager::Update(Core::System& system) {
         }
     }
     auto_profile = selected;
+    if (record_max > 0 && record_count < record_max) {
+        const Profile* rp = CurrentProfile();
+        const std::string rname = rp ? rp->name : std::string{};
+        const bool wanted = std::find(record_profiles.begin(), record_profiles.end(), rname) !=
+                            record_profiles.end();
+        bool ready = false;
+        {
+            std::scoped_lock clock{capture_mutex};
+            ready = capture_ready;
+        }
+        if (ready) {
+            if (wanted) {
+                WriteRecord(system, rname);
+            }
+            std::scoped_lock clock{capture_mutex};
+            capture_ready = false;
+            capture_rgb.clear();
+        } else if (wanted && !capture_pending.load() &&
+                   present_frame - record_last >= record_interval) {
+            record_last = present_frame;
+            capture_pending = true;
+        }
+    }
     if (user_enabled) {
         const Profile* p = CurrentProfile();
         hud.Update(system, p ? p->name : std::string{});
     } else {
         hud.Update(system, std::string{});
     }
+}
+
+void Manager::SetBottomCapture(std::vector<u8> rgb) {
+    std::scoped_lock clock{capture_mutex};
+    capture_rgb = std::move(rgb);
+    capture_ready = true;
+    capture_pending = false;
+}
+
+void Manager::WriteRecord(Core::System& system, const std::string& profile) {
+    const auto process = system.Kernel().GetCurrentProcess();
+    if (!process) {
+        return;
+    }
+    auto& memory = system.Memory();
+    std::vector<u8> out;
+    auto put32 = [&out](u32 v) {
+        for (int i = 0; i < 4; ++i) {
+            out.push_back(static_cast<u8>(v >> (8 * i)));
+        }
+    };
+    const char magic[8] = {'S', 'R', 'R', 'E', 'C', '1', 0, 0};
+    out.insert(out.end(), magic, magic + 8);
+    put32(present_frame);
+    char pname[16]{};
+    std::copy_n(profile.begin(), std::min<size_t>(profile.size(), 15), pname);
+    out.insert(out.end(), pname, pname + 16);
+    // Guest memory: game .data/.bss, the whole heap, and the start of linear heap (save data).
+    std::vector<std::pair<u32, u32>> ranges{{0x00568000, 0xE5000}};
+    for (const auto& [vaddr, vma] : process->vm_manager.vma_map) {
+        if (vma.type == Kernel::VMAType::BackingMemory && vma.base >= 0x08000000 &&
+            vma.base < 0x10000000) {
+            ranges.emplace_back(vma.base, vma.size);
+        }
+    }
+    ranges.emplace_back(0x30C00000, 0x200000);
+    put32(static_cast<u32>(ranges.size()));
+    for (const auto& [va, size] : ranges) {
+        put32(va);
+        put32(size);
+        const size_t at = out.size();
+        out.resize(at + size);
+        if (memory.IsValidVirtualAddress(*process, va) &&
+            memory.IsValidVirtualAddress(*process, va + size - 1)) {
+            memory.ReadBlock(*process, va, out.data() + at, size);
+        }
+    }
+    {
+        std::scoped_lock clock{capture_mutex};
+        put32(320);
+        put32(240);
+        capture_rgb.resize(320 * 240 * 3);
+        out.insert(out.end(), capture_rgb.begin(), capture_rgb.end());
+    }
+    const std::string dir =
+        fmt::format("{}screen_regions/", FileUtil::GetUserPath(FileUtil::UserPath::DumpDir));
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    const std::string path = fmt::format("{}rec_{:016X}_{}.zst", dir, title_id, now);
+    ++record_count;
+    // Compress and write off the emulation thread so recording doesn't stutter the game.
+    std::thread([dir, path, data = std::move(out)]() {
+        const auto packed = Common::Compression::CompressDataZSTD(data, 3);
+        FileUtil::CreateFullPath(dir);
+        FileUtil::IOFile file(path, "wb");
+        if (file.IsOpen()) {
+            file.WriteBytes(packed.data(), packed.size());
+        }
+    }).detach();
 }
 
 void Manager::NoteTexture(u64 hash) {

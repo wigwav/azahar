@@ -756,8 +756,10 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
  */
 void RendererOpenGL::ReadProbes() {
     auto& probes = ScreenRegions::Probes::Instance();
+    auto& manager = ScreenRegions::Manager::Instance();
     const auto requests = probes.Requests();
-    if (requests.empty() || (++probe_frame & 3) != 0) {
+    const bool capture = manager.WantsBottomCapture();
+    if (!capture && (requests.empty() || (++probe_frame & 3) != 0)) {
         return;
     }
     const ScreenInfo& info = screen_infos[2];
@@ -782,6 +784,28 @@ void RendererOpenGL::ReadProbes() {
                            info.display_texture, 0);
     if (tex_w > 0 && tex_h > 0 &&
         glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        if (capture) {
+            std::vector<u8> full(static_cast<size_t>(tex_w) * tex_h * 4);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, tex_w, tex_h, GL_RGBA, GL_UNSIGNED_BYTE, full.data());
+            std::vector<u8> rgb(320 * 240 * 3);
+            for (u32 y = 0; y < 240; ++y) {
+                for (u32 x = 0; x < 320; ++x) {
+                    const float fx = (static_cast<float>(x) + 0.5f) / 320.0f;
+                    const float fy = (static_cast<float>(y) + 0.5f) / 240.0f;
+                    const float s_coord = tc.bottom + (tc.top - tc.bottom) * fy;
+                    const float t_coord = tc.left + (tc.right - tc.left) * fx;
+                    const GLint px = std::clamp(static_cast<GLint>(s_coord * tex_w), 0, tex_w - 1);
+                    const GLint py = std::clamp(static_cast<GLint>(t_coord * tex_h), 0, tex_h - 1);
+                    const u8* src = &full[(static_cast<size_t>(py) * tex_w + px) * 4];
+                    u8* dst = &rgb[(y * 320 + x) * 3];
+                    dst[0] = src[0];
+                    dst[1] = src[1];
+                    dst[2] = src[2];
+                }
+            }
+            manager.SetBottomCapture(std::move(rgb));
+        }
         for (const auto& [x, y] : requests) {
             const float fx = (static_cast<float>(x) + 0.5f) / 320.0f;
             const float fy = (static_cast<float>(y) + 0.5f) / 240.0f;

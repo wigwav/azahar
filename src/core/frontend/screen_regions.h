@@ -101,6 +101,11 @@ public:
 
     std::string StatusText() const;
 
+    /// Recorder (layout research): true when the renderer should hand over the bottom screen.
+    bool WantsBottomCapture() const { return capture_pending.load(); }
+    /// Renderer hands over the bottom screen as 320x240 RGB8 (top-left origin).
+    void SetBottomCapture(std::vector<u8> rgb);
+
     /// Current HUD canvas (may be null) and its version; plus where to draw it.
     std::shared_ptr<const Image> HudCanvas(u64& version) const;
     Common::Rectangle<float> CanvasRect(const Layout::FramebufferLayout& layout) const;
@@ -147,6 +152,19 @@ private:
     // Texture-rule tracking (emulation thread only)
     u32 present_frame = 1;
     std::vector<std::pair<u64, u32>> texture_seen; ///< watched hash -> last frame drawn
+
+    // Recorder: periodically saves guest RAM + the bottom screen while chosen profiles are
+    // active, so UI state variables can be located offline ("record = battle,menu 90 400").
+    std::vector<std::string> record_profiles;
+    u32 record_interval = 90;
+    u32 record_max = 0;
+    u32 record_count = 0;
+    u32 record_last = 0;
+    std::atomic<bool> capture_pending{false};
+    std::mutex capture_mutex;
+    std::vector<u8> capture_rgb;
+    bool capture_ready = false;
+    void WriteRecord(Core::System& system, const std::string& profile);
 
 };
 
