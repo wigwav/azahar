@@ -168,28 +168,44 @@ bool Manager::LoadFile(const std::string& path) {
                     current->regions.push_back(region);
                 }
             } else if (section == Section::Auto && key == "rule") {
+                // rule = texture HASH[,HASH...] -> profile
                 // rule = 0xADDR u8|u16|u32 ==|!=|&|!&|>|< VALUE -> profile
                 const auto arrow = value.find("->");
                 if (arrow == std::string::npos) {
                     throw std::invalid_argument("missing ->");
                 }
                 std::istringstream in(value.substr(0, arrow));
-                std::string addr, size, op, val;
-                if (!(in >> addr >> size >> op >> val)) {
-                    throw std::invalid_argument("bad rule");
-                }
+                std::string first;
+                in >> first;
                 Rule rule;
-                rule.addr = ParseNumber(addr);
-                const std::string lsize = Lower(size);
-                rule.size = lsize == "u32" ? 4 : lsize == "u16" ? 2 : 1;
-                if (op == "==") rule.op = RuleOp::Eq;
-                else if (op == "!=") rule.op = RuleOp::Ne;
-                else if (op == "&") rule.op = RuleOp::And;
-                else if (op == "!&") rule.op = RuleOp::NotAnd;
-                else if (op == ">") rule.op = RuleOp::Gt;
-                else if (op == "<") rule.op = RuleOp::Lt;
-                else throw std::invalid_argument("bad operator");
-                rule.value = ParseNumber(val);
+                if (Lower(first) == "texture") {
+                    std::string list, item;
+                    std::getline(in, list);
+                    std::replace(list.begin(), list.end(), ',', ' ');
+                    std::istringstream items(list);
+                    while (items >> item) {
+                        rule.textures.push_back(std::stoull(item, nullptr, 16));
+                    }
+                    if (rule.textures.empty()) {
+                        throw std::invalid_argument("texture rule without hashes");
+                    }
+                } else {
+                    std::string size, op, val;
+                    if (!(in >> size >> op >> val)) {
+                        throw std::invalid_argument("bad rule");
+                    }
+                    rule.addr = ParseNumber(first);
+                    const std::string lsize = Lower(size);
+                    rule.size = lsize == "u32" ? 4 : lsize == "u16" ? 2 : 1;
+                    if (op == "==") rule.op = RuleOp::Eq;
+                    else if (op == "!=") rule.op = RuleOp::Ne;
+                    else if (op == "&") rule.op = RuleOp::And;
+                    else if (op == "!&") rule.op = RuleOp::NotAnd;
+                    else if (op == ">") rule.op = RuleOp::Gt;
+                    else if (op == "<") rule.op = RuleOp::Lt;
+                    else throw std::invalid_argument("bad operator");
+                    rule.value = ParseNumber(val);
+                }
                 rule.profile = Trim(value.substr(arrow + 2));
                 rules.push_back(rule);
             }
@@ -200,6 +216,12 @@ bool Manager::LoadFile(const std::string& path) {
 
     if (default_profile.empty() && !profiles.empty()) {
         default_profile = profiles.front().name;
+    }
+    texture_seen.clear();
+    for (const auto& rule : rules) {
+        for (const u64 hash : rule.textures) {
+            texture_seen.emplace_back(hash, 0);
+        }
     }
     LOG_INFO(Frontend, "Screen regions loaded from {}: {} profiles, {} rules, enabled={}", path,
              profiles.size(), rules.size(), file_enabled);
@@ -216,6 +238,7 @@ void Manager::Update(Core::System& system) {
     }
 
     std::scoped_lock lock{mutex};
+    ++present_frame;
     const u64 current_title = process->codeset->program_id;
     const bool title_changed = current_title != title_id;
     const bool check_file = title_changed || reload_requested.exchange(false) ||
@@ -250,10 +273,28 @@ void Manager::Update(Core::System& system) {
         return;
     }
 
-    // Automatic profile selection: first matching rule wins.
+    // Automatic profile selection.
+    //  1. Memory rules: the first matching rule wins.
+    //  2. Texture rules: the rule whose texture was drawn most recently wins (ties: file order).
     auto& memory = system.Memory();
     std::string selected;
+    u32 best_frame = 0;
     for (const auto& rule : rules) {
+        if (!rule.textures.empty()) {
+            u32 seen = 0;
+            for (const u64 hash : rule.textures) {
+                for (const auto& [h, frame] : texture_seen) {
+                    if (h == hash) {
+                        seen = std::max(seen, frame);
+                    }
+                }
+            }
+            if (seen > best_frame) {
+                best_frame = seen;
+                selected = rule.profile;
+            }
+            continue;
+        }
         if (!memory.IsValidVirtualAddress(*process, rule.addr)) {
             continue;
         }
@@ -284,6 +325,15 @@ void Manager::Update(Core::System& system) {
         }
     }
     auto_profile = selected;
+}
+
+void Manager::NoteTexture(u64 hash) {
+    for (auto& [h, frame] : texture_seen) {
+        if (h == hash) {
+            frame = present_frame;
+            return;
+        }
+    }
 }
 
 const Profile* Manager::FindProfile(const std::string& name) const {

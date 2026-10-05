@@ -13,6 +13,7 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/memory.h"
+#include "core/frontend/screen_regions.h"
 #include "video_core/custom_textures/custom_tex_manager.h"
 #include "video_core/pica/regs_external.h"
 #include "video_core/pica/regs_internal.h"
@@ -557,7 +558,11 @@ typename T::Surface& RasterizerCache<T>::GetTextureSurface(
     const auto info = Pica::Texture::TextureInfo::FromPicaRegister(config.config, config.format);
     const u32 max_level = MipLevels(info.width, info.height, config.config.lod.max_level) - 1;
     const SurfaceId surface_id = GetTextureSurface(info, max_level);
-    return slot_surfaces[surface_id];
+    auto& surface = slot_surfaces[surface_id];
+    if (surface.material) {
+        ScreenRegions::Manager::Instance().NoteTexture(surface.material->hash);
+    }
+    return surface;
 }
 
 template <class T>

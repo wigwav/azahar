@@ -53,6 +53,7 @@ struct Profile {
 enum class RuleOp { Eq, Ne, And, NotAnd, Gt, Lt };
 
 struct Rule {
+    std::vector<u64> textures; ///< If set: matches when one of these custom textures was drawn
     u32 addr = 0;
     u32 size = 1; ///< 1, 2 or 4 bytes
     RuleOp op = RuleOp::Eq;
@@ -74,6 +75,9 @@ public:
 
     /// Called once per presented frame from the renderer (emulation thread).
     void Update(Core::System& system);
+
+    /// Called by the rasterizer whenever a custom (replaced) texture is sampled (emulation thread).
+    void NoteTexture(u64 hash);
 
     bool IsActive() const;
     bool HideBottom() const;
@@ -131,6 +135,11 @@ private:
     int manual_index = -1; ///< -1 = automatic selection
     std::string auto_profile;
     std::atomic<bool> reload_requested{false};
+
+    // Texture-rule tracking (emulation thread only)
+    u32 present_frame = 1;
+    std::vector<std::pair<u64, u32>> texture_seen; ///< watched hash -> last frame drawn
+
 };
 
 } // namespace ScreenRegions
