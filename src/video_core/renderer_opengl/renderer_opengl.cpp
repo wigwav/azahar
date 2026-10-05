@@ -690,7 +690,9 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
         ReloadShader(layout.render_3d_mode);
     }
 
-    const auto& top_screen = layout.top_screen;
+    // Screen Regions may move the top screen for the active profile.
+    const auto region_layout = ScreenRegions::Manager::Instance().Apply(layout);
+    const auto& top_screen = region_layout.top_screen;
     const auto& bottom_screen = layout.bottom_screen;
 
     glViewport(0, 0, layout.width, layout.height);

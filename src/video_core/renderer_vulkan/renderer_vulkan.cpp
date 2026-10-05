@@ -1025,7 +1025,9 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
 
     PrepareDraw(frame, layout);
 
-    const auto& top_screen = layout.top_screen;
+    // Screen Regions may move the top screen for the active profile.
+    const auto region_layout = ScreenRegions::Manager::Instance().Apply(layout);
+    const auto& top_screen = region_layout.top_screen;
     const auto& bottom_screen = layout.bottom_screen;
     draw_info.modelview = MakeOrthographicMatrix(layout.width, layout.height);
 

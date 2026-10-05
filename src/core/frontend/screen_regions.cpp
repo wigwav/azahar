@@ -132,6 +132,13 @@ bool Manager::LoadFile(const std::string& path) {
             } else if (section == Section::Profile && current) {
                 if (key == "hide_bottom") {
                     current->hide_bottom = value != "0" && Lower(value) != "false";
+                } else if (key == "top") {
+                    // top = x y w h  (window canvas space)
+                    std::istringstream in(value);
+                    if (!ParseRect(in, current->top)) {
+                        throw std::invalid_argument("bad top rectangle");
+                    }
+                    current->has_top = true;
                 } else if (key == "region") {
                     // region = sx sy sw sh -> dx dy dw dh [opacity=0.9] [touch=0]
                     const auto arrow = value.find("->");
@@ -154,6 +161,8 @@ bool Manager::LoadFile(const std::string& path) {
                             region.opacity = std::clamp(std::stof(oval), 0.0f, 1.0f);
                         } else if (okey == "touch") {
                             region.touch = oval != "0";
+                        } else if (okey == "space") {
+                            region.space = Lower(oval) == "window" ? 1 : 0;
                         }
                     }
                     current->regions.push_back(region);
@@ -318,9 +327,9 @@ bool Manager::HideBottom() const {
 }
 
 Common::Rectangle<float> Manager::ToFramebuffer(const Layout::FramebufferLayout& layout,
-                                                const Rect& r) const {
+                                                const Rect& r, bool window_space) const {
     float ox, oy, sx, sy;
-    if (space_window) {
+    if (window_space) {
         ox = 0.0f;
         oy = 0.0f;
         sx = static_cast<float>(layout.width) / canvas_w;
@@ -337,18 +346,45 @@ Common::Rectangle<float> Manager::ToFramebuffer(const Layout::FramebufferLayout&
     return {left, top, left + r.w * sx, top + r.h * sy};
 }
 
+Layout::FramebufferLayout Manager::ApplyLocked(const Layout::FramebufferLayout& layout) const {
+    Layout::FramebufferLayout out = layout;
+    if (!(file_enabled && user_enabled) || !layout.is_rotated) {
+        return out;
+    }
+    const Profile* src = nullptr;
+    if (const auto* overlay = OverlayProfile(); overlay && overlay->has_top) {
+        src = overlay;
+    } else if (const auto* current = CurrentProfile(); current && current->has_top) {
+        src = current;
+    }
+    if (src) {
+        const auto r = ToFramebuffer(layout, src->top, true);
+        out.top_screen = Common::Rectangle<u32>{
+            static_cast<u32>(std::max(0.0f, r.left)), static_cast<u32>(std::max(0.0f, r.top)),
+            static_cast<u32>(std::max(0.0f, r.right)), static_cast<u32>(std::max(0.0f, r.bottom))};
+    }
+    return out;
+}
+
+Layout::FramebufferLayout Manager::Apply(const Layout::FramebufferLayout& layout) const {
+    std::scoped_lock lock{mutex};
+    return ApplyLocked(layout);
+}
+
 std::vector<DrawRegion> Manager::Resolve(const Layout::FramebufferLayout& layout) const {
     std::scoped_lock lock{mutex};
     std::vector<DrawRegion> out;
     if (!(file_enabled && user_enabled)) {
         return out;
     }
+    const auto adjusted = ApplyLocked(layout);
     const auto append = [&](const Profile* profile) {
         if (!profile) {
             return;
         }
         for (const auto& r : profile->regions) {
-            const auto dst = ToFramebuffer(layout, r.dst);
+            const bool window_space = r.space < 0 ? space_window : r.space == 1;
+            const auto dst = ToFramebuffer(adjusted, r.dst, window_space);
             out.push_back(DrawRegion{
                 Common::Rectangle<float>{r.src.x / BottomWidth, r.src.y / BottomHeight,
                                          (r.src.x + r.src.w) / BottomWidth,

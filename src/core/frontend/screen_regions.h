@@ -39,12 +39,15 @@ struct Region {
     Rect dst;             ///< Destination, in the profile file's coordinate space
     float opacity = 1.0f; ///< 0..1
     bool touch = true;    ///< Mouse clicks inside dst are forwarded as touches at src
+    int space = -1;       ///< -1: file default, 0: top-screen space, 1: window canvas space
 };
 
 struct Profile {
     std::string name;
     std::vector<Region> regions;
     bool hide_bottom = true; ///< Suppress the normal bottom screen while this profile is active
+    bool has_top = false;    ///< Override the top screen placement while active
+    Rect top;                ///< Top screen rectangle in window canvas space
 };
 
 enum class RuleOp { Eq, Ne, And, NotAnd, Gt, Lt };
@@ -75,7 +78,10 @@ public:
     bool IsActive() const;
     bool HideBottom() const;
 
-    /// Draw list for the given framebuffer layout, in back-to-front order.
+    /// Returns the layout with the active profile's top-screen placement applied.
+    Layout::FramebufferLayout Apply(const Layout::FramebufferLayout& layout) const;
+
+    /// Draw list for the given (unmodified) framebuffer layout, in back-to-front order.
     std::vector<DrawRegion> Resolve(const Layout::FramebufferLayout& layout) const;
 
     /// Maps a framebuffer click to a normalised bottom-screen touch (0..1, origin top-left).
@@ -98,8 +104,9 @@ private:
     const Profile* FindProfile(const std::string& name) const;
     const Profile* CurrentProfile() const;
     const Profile* OverlayProfile() const;
-    Common::Rectangle<float> ToFramebuffer(const Layout::FramebufferLayout& layout,
-                                           const Rect& r) const;
+    Common::Rectangle<float> ToFramebuffer(const Layout::FramebufferLayout& layout, const Rect& r,
+                                           bool window_space) const;
+    Layout::FramebufferLayout ApplyLocked(const Layout::FramebufferLayout& layout) const;
 
     mutable std::mutex mutex;
 
