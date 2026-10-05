@@ -3,6 +3,7 @@
 // Refer to the misc/licenses/gplv2.txt file included.
 
 #include <chrono>
+#include <cstdlib>
 #include <sstream>
 #include <cryptopp/hex.h>
 #include <fmt/ranges.h>
@@ -223,7 +224,8 @@ void System::LoadState(u32 slot) {
         SaveStateInfo info;
         info.slot = slot;
         if (!ValidateSaveState(header, info, title_id, movie_id) ||
-            info.status == SaveStateInfo::ValidationStatus::BuildMismatch) {
+            (info.status == SaveStateInfo::ValidationStatus::BuildMismatch &&
+             !std::getenv("CITRA_ALLOW_STATE_BUILD_MISMATCH"))) {
             throw std::runtime_error("Invalid savestate");
         }
 
@@ -237,7 +239,14 @@ void System::LoadState(u32 slot) {
         std::ios_base::binary};
     decompressed.clear();
 
-    // Deserialize
+    // Deserialize. CITRA_ALLOW_STATE_BUILD_MISMATCH also accepts states written on a platform
+    // with a different `long` size (e.g. Windows states on Linux): the archive header is skipped.
+    if (std::getenv("CITRA_ALLOW_STATE_BUILD_MISMATCH")) {
+        sstream.seekg(0x28);
+        iarchive ia{sstream, boost::archive::no_header};
+        ia&* this;
+        return;
+    }
     iarchive ia{sstream};
     ia&* this;
 }

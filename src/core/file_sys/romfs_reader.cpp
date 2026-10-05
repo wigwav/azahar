@@ -2,6 +2,8 @@
 // Licensed under GPLv2 or any later version
 // Refer to the misc/licenses/gplv2.txt file included.
 
+#include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include <vector>
 #include <cryptopp/aes.h>
@@ -19,6 +21,10 @@ SERIALIZE_EXPORT_IMPL(FileSys::DirectRomFSReader)
 namespace FileSys {
 
 std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length, u8* buffer) {
+    static const bool log_reads = std::getenv("CITRA_LOG_ROMFS") != nullptr;
+    if (log_reads) {
+        std::fprintf(stderr, "ROMFS %zx %zx\n", offset, length);
+    }
     length = std::min(length, GetSize() - offset);
     if (length == 0)
         return 0; // Crypto++ does not like zero size buffer
