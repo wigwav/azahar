@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <chrono>
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -420,8 +421,43 @@ u32 Obj(const Env& e) {
     const u32 b = a ? static_cast<u32>(e.Read(a + 0x384, 4, false)) : 0;
     return b ? static_cast<u32>(e.Read(b + 0x2F8, 4, false)) : 0;
 }
+constexpr u32 BattleMgrPtr = 0x0057113C;  // -> battle manager; live unit records inside it
+constexpr u32 UnitBase = 0x200E6, UnitStride = 0x408;
+// unit record (from its demon id field): +0 demon id (0 = Nanashi), +6 party slot, +0xF2 HP,
+// +0xF6 max HP, +0xFA MP, +0xFE max MP (u32), +0x114 level
+u32 Unit(const Env& e, s64 k) {
+    if (k < 0 || k > 3) {
+        return 0;
+    }
+    const u32 mgr = static_cast<u32>(e.Read(BattleMgrPtr, 4, false));
+    return mgr ? mgr + UnitBase + static_cast<u32>(k) * UnitStride : 0;
+}
+s64 UnitDemon(const Env& e, s64 k) {
+    const u32 u = Unit(e, k);
+    return u ? e.Read(u, 2, false) : -1;
+}
+/// Stock record holding demon `id` (skill potency lives there)
+u32 StockOf(const Env& e, s64 id) {
+    const u32 save = static_cast<u32>(e.Read(SaveDataPtr, 4, false));
+    if (!save || id <= 0) {
+        return 0;
+    }
+    for (u32 i = 0; i < StockMax; ++i) {
+        const u32 r = save + StockBase + i * StockStride;
+        if (e.Read(r + 0x62, 2, false) == id) {
+            return r;
+        }
+    }
+    return 0;
+}
 /// Record of party member k (0 = Nanashi, 1..3 = demons by party position); skills at +0x34.
 u32 Rec(const Env& e, s64 k) {
+    if (k > 0) {
+        const s64 id = UnitDemon(e, k);
+        if (id > 0) {
+            return StockOf(e, id);
+        }
+    }
     const u32 save = Save(e);
     if (!save) {
         return 0;
@@ -438,6 +474,10 @@ u32 Rec(const Env& e, s64 k) {
     return 0;
 }
 s64 Stat(const Env& e, s64 k, int which) {
+    if (const u32 u = Unit(e, k); u && (k == 0 || UnitDemon(e, k) > 0)) {
+        static constexpr u32 uoff[] = {0xF2, 0xFA, 0xF6, 0xFE, 0x114};
+        return e.Read(u + uoff[which], which == 4 ? 2 : 4, false);
+    }
     const u32 save = Save(e);
     if (!save) {
         return 0;
@@ -580,6 +620,7 @@ Value Call(const ExprNode& n, const Env& env) {
     if (f == "s16") return env.Read(static_cast<u32>(arg(0)), 2, true);
     if (f == "u32") return env.Read(static_cast<u32>(arg(0)), 4, false);
     if (f == "s32") return env.Read(static_cast<u32>(arg(0)), 4, true);
+    if (f == "time") return static_cast<s64>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     if (f == "min") return std::min(arg(0), arg(1));
     if (f == "max") return std::max(arg(0), arg(1));
     if (f == "abs") return std::abs(arg(0));
@@ -602,7 +643,12 @@ Value Call(const ExprNode& n, const Env& env) {
     if (f == "smt4a_maxhp") return Smt4a::Stat(env, arg(0), 2);
     if (f == "smt4a_maxmp") return Smt4a::Stat(env, arg(0), 3);
     if (f == "smt4a_level") return Smt4a::Stat(env, arg(0), 4);
+    if (f == "smt4a_unit") return Smt4a::Unit(env, arg(0));
     if (f == "smt4a_demon") {
+        if (arg(0) > 0 && Smt4a::Unit(env, arg(0))) {
+            const s64 id = Smt4a::UnitDemon(env, arg(0));
+            return id > 0 ? id : -1;
+        }
         const u32 r = arg(0) <= 0 ? 0 : Smt4a::Rec(env, arg(0));
         return r ? env.Read(r + 0x62, 2, false) : -1;
     }
@@ -617,7 +663,7 @@ Value Call(const ExprNode& n, const Env& env) {
     }
     if (f == "smt4a_skillicon") {
         const s64 id = arg(0);
-        if (id < 0) return id == -1 ? 0 : 1;
+        if (id < 0) return id == -1 ? 1 : 3; // Attack: phys, Shoot: gun
         const std::string s = env.Field("smt4a_skills.txt", id, 4);
         return s.empty() ? 0 : std::stoll(s);
     }
