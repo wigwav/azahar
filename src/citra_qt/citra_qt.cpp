@@ -107,6 +107,7 @@
 #include "core/file_sys/archive_extsavedata.h"
 #include "core/file_sys/archive_source_sd_savedata.h"
 #include "core/frontend/applets/default_applets.h"
+#include "core/frontend/screen_regions.h"
 #include "core/hle/service/am/am.h"
 #include "core/hle/service/fs/archive.h"
 #include "core/hle/service/nfc/nfc.h"
@@ -924,6 +925,18 @@ void GMainWindow::InitializeHotkeys() {
     };
 
     connect_shortcut(QStringLiteral("Toggle Screen Layout"), &GMainWindow::ToggleScreenLayout);
+    connect_shortcut(QStringLiteral("Screen Regions: Cycle Profile"), [&] {
+        auto& regions = ScreenRegions::Manager::Instance();
+        regions.CycleProfile();
+        LOG_INFO(Frontend, "{}", regions.StatusText());
+    });
+    connect_shortcut(QStringLiteral("Screen Regions: Toggle"), [&] {
+        auto& regions = ScreenRegions::Manager::Instance();
+        regions.ToggleEnabled();
+        LOG_INFO(Frontend, "{}", regions.StatusText());
+    });
+    connect_shortcut(QStringLiteral("Screen Regions: Toggle Overlay"),
+                     [&] { ScreenRegions::Manager::Instance().ToggleOverlay(); });
     connect_shortcut(QStringLiteral("Exit Fullscreen"), [&] {
         if (emulation_running) {
             if (secondary_window->isActiveWindow()) {

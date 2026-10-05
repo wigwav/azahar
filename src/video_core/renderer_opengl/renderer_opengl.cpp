@@ -7,6 +7,7 @@
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
+#include "core/frontend/screen_regions.h"
 #include "core/frontend/framebuffer_layout.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
@@ -90,6 +91,7 @@ RendererOpenGL::~RendererOpenGL() = default;
 
 void RendererOpenGL::SwapBuffers() {
     system.perf_stats->StartSwap();
+    ScreenRegions::Manager::Instance().Update(system);
     // Maintain the rasterizer's state as a priority
     OpenGLState prev_state = OpenGLState::GetCurState();
     state.Apply();
@@ -714,14 +716,19 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
         glUniform1i(uniform_color_texture_r, 1);
     }
 
+    const bool hide_bottom = ScreenRegions::Manager::Instance().HideBottom();
     glUniform1i(uniform_layer, 0);
     if (!Settings::values.swap_screen.GetValue()) {
         DrawTopScreen(layout, top_screen);
         glUniform1i(uniform_layer, 0);
         ApplySecondLayerOpacity(layout.bottom_opacity);
-        DrawBottomScreen(layout, bottom_screen);
+        if (!hide_bottom) {
+            DrawBottomScreen(layout, bottom_screen);
+        }
     } else {
-        DrawBottomScreen(layout, bottom_screen);
+        if (!hide_bottom) {
+            DrawBottomScreen(layout, bottom_screen);
+        }
         glUniform1i(uniform_layer, 0);
         ApplySecondLayerOpacity(layout.top_opacity);
         DrawTopScreen(layout, top_screen);
@@ -735,7 +742,59 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
             DrawBottomScreen(layout, additional_screen);
         }
     }
+    DrawScreenRegions(layout);
     ResetSecondLayerOpacity();
+}
+
+/**
+ * Draws the bottom-screen regions selected by the active Screen Regions profile.
+ */
+void RendererOpenGL::DrawScreenRegions(const Layout::FramebufferLayout& layout) {
+    if (!layout.is_rotated || layout.render_3d_mode != Settings::StereoRenderOption::Off) {
+        return;
+    }
+    const auto regions = ScreenRegions::Manager::Instance().Resolve(layout);
+    if (regions.empty()) {
+        return;
+    }
+    const ScreenInfo& screen_info = screen_infos[2];
+    const auto& tc = screen_info.display_texcoords;
+    const u32 scale_factor = GetResolutionScaleFactor();
+    const GLuint sampler = samplers[Settings::values.filter_mode.GetValue()].handle;
+
+    glUniform1i(uniform_layer, 0);
+    for (const auto& r : regions) {
+        if (r.w <= 0.0f || r.h <= 0.0f || r.opacity <= 0.0f) {
+            continue;
+        }
+        const float u0 = tc.bottom + (tc.top - tc.bottom) * r.src_norm.top;
+        const float u1 = tc.bottom + (tc.top - tc.bottom) * r.src_norm.bottom;
+        const float v0 = tc.left + (tc.right - tc.left) * r.src_norm.left;
+        const float v1 = tc.left + (tc.right - tc.left) * r.src_norm.right;
+        const std::array<ScreenRectVertex, 4> vertices = {{
+            ScreenRectVertex(r.x, r.y, u0, v0),
+            ScreenRectVertex(r.x + r.w, r.y, u0, v1),
+            ScreenRectVertex(r.x, r.y + r.h, u1, v0),
+            ScreenRectVertex(r.x + r.w, r.y + r.h, u1, v1),
+        }};
+
+        ApplySecondLayerOpacity(r.opacity);
+        glUniform4f(uniform_i_resolution,
+                    static_cast<float>(screen_info.texture.width * scale_factor),
+                    static_cast<float>(screen_info.texture.height * scale_factor),
+                    1.0f / static_cast<float>(screen_info.texture.width * scale_factor),
+                    1.0f / static_cast<float>(screen_info.texture.height * scale_factor));
+        glUniform4f(uniform_o_resolution, r.w, r.h, 1.0f / r.w, 1.0f / r.h);
+        state.texture_units[0].texture_2d = screen_info.display_texture;
+        state.texture_units[0].sampler = sampler;
+        state.Apply();
+
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+    state.texture_units[0].texture_2d = 0;
+    state.texture_units[0].sampler = 0;
+    state.Apply();
 }
 
 void RendererOpenGL::ApplySecondLayerOpacity(float opacity) {

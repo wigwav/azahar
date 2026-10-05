@@ -66,6 +66,7 @@ private:
                                      const Pica::ColorFill& color_fill);
     void DrawScreens(const Layout::FramebufferLayout& layout, bool flipped);
     void ApplySecondLayerOpacity(float opacity = 1.0f);
+    void DrawScreenRegions(const Layout::FramebufferLayout& layout);
     void ResetSecondLayerOpacity();
     void DrawBottomScreen(const Layout::FramebufferLayout& layout,
                           const Common::Rectangle<u32>& bottom_screen);

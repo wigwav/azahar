@@ -9,6 +9,7 @@
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
+#include "core/frontend/screen_regions.h"
 #include "video_core/gpu.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
@@ -1033,15 +1034,20 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
     // Apply the initial default opacity value; Needed to avoid flickering
     ApplySecondLayerOpacity(1.0f);
 
+    const bool hide_bottom = ScreenRegions::Manager::Instance().HideBottom();
     if (!Settings::values.swap_screen.GetValue()) {
         DrawTopScreen(layout, top_screen);
         draw_info.layer = 0;
         if (layout.bottom_opacity < 1) {
             ApplySecondLayerOpacity(layout.bottom_opacity);
         }
-        DrawBottomScreen(layout, bottom_screen);
+        if (!hide_bottom) {
+            DrawBottomScreen(layout, bottom_screen);
+        }
     } else {
-        DrawBottomScreen(layout, bottom_screen);
+        if (!hide_bottom) {
+            DrawBottomScreen(layout, bottom_screen);
+        }
         draw_info.layer = 0;
         if (layout.top_opacity < 1) {
             ApplySecondLayerOpacity(layout.top_opacity);
@@ -1058,9 +1064,67 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
         }
     }
 
+    DrawScreenRegions(layout);
+    ApplySecondLayerOpacity(1.0f);
+
     DrawCursor(layout);
 
     scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRenderPass(); });
+}
+
+void RendererVulkan::DrawScreenRegions(const Layout::FramebufferLayout& layout) {
+    if (!layout.is_rotated || layout.render_3d_mode != Settings::StereoRenderOption::Off) {
+        return;
+    }
+    const auto regions = ScreenRegions::Manager::Instance().Resolve(layout);
+    if (regions.empty()) {
+        return;
+    }
+    const ScreenInfo& screen_info = screen_infos[2];
+    const auto& tc = screen_info.texcoords;
+    const u32 scale_factor = GetResolutionScaleFactor();
+    draw_info.layer = 0;
+
+    for (const auto& r : regions) {
+        if (r.w <= 0.0f || r.h <= 0.0f || r.opacity <= 0.0f) {
+            continue;
+        }
+        const float u0 = tc.bottom + (tc.top - tc.bottom) * r.src_norm.top;
+        const float u1 = tc.bottom + (tc.top - tc.bottom) * r.src_norm.bottom;
+        const float v0 = tc.left + (tc.right - tc.left) * r.src_norm.left;
+        const float v1 = tc.left + (tc.right - tc.left) * r.src_norm.right;
+        const std::array<ScreenRectVertex, 4> vertices = {{
+            ScreenRectVertex(r.x, r.y, u0, v0),
+            ScreenRectVertex(r.x + r.w, r.y, u0, v1),
+            ScreenRectVertex(r.x, r.y + r.h, u1, v0),
+            ScreenRectVertex(r.x + r.w, r.y + r.h, u1, v1),
+        }};
+
+        ApplySecondLayerOpacity(r.opacity);
+
+        const u64 size = sizeof(ScreenRectVertex) * vertices.size();
+        auto [data, offset, invalidate] = vertex_buffer.Map(size, 16);
+        std::memcpy(data, vertices.data(), size);
+        vertex_buffer.Commit(size);
+
+        draw_info.i_resolution =
+            Common::MakeVec(static_cast<f32>(screen_info.texture.width * scale_factor),
+                            static_cast<f32>(screen_info.texture.height * scale_factor),
+                            1.0f / static_cast<f32>(screen_info.texture.width * scale_factor),
+                            1.0f / static_cast<f32>(screen_info.texture.height * scale_factor));
+        draw_info.o_resolution = Common::MakeVec(r.w, r.h, 1.0f / r.w, 1.0f / r.h);
+        draw_info.screen_id_l = 2;
+
+        scheduler.Record([this, offset = offset, info = draw_info](vk::CommandBuffer cmdbuf) {
+            const u32 first_vertex = static_cast<u32>(offset) / sizeof(ScreenRectVertex);
+            cmdbuf.pushConstants(*present_pipeline_layout,
+                                 vk::ShaderStageFlagBits::eFragment |
+                                     vk::ShaderStageFlagBits::eVertex,
+                                 0, sizeof(info), &info);
+            cmdbuf.bindVertexBuffers(0, vertex_buffer.Handle(), {0});
+            cmdbuf.draw(4, 1, first_vertex, 0);
+        });
+    }
 }
 
 void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
@@ -1125,6 +1189,7 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
 
 void RendererVulkan::SwapBuffers() {
     system.perf_stats->StartSwap();
+    ScreenRegions::Manager::Instance().Update(system);
     screenRendered = false;
 #ifndef ANDROID
     if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::SeparateWindows) {

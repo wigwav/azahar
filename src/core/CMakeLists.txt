@@ -121,6 +121,8 @@ add_library(citra_core STATIC EXCLUDE_FROM_ALL
     frontend/emu_window.h
     frontend/framebuffer_layout.cpp
     frontend/framebuffer_layout.h
+    frontend/screen_regions.cpp
+    frontend/screen_regions.h
     frontend/image_interface.cpp
     frontend/image_interface.h
     frontend/input.h

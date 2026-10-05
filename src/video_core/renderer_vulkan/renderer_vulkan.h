@@ -111,6 +111,7 @@ private:
                                 float h, Layout::DisplayOrientation orientation);
 
     void ApplySecondLayerOpacity(float alpha);
+    void DrawScreenRegions(const Layout::FramebufferLayout& layout);
 
     void DrawCursor(const Layout::FramebufferLayout& layout);
 

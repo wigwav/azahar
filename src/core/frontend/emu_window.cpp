@@ -2,12 +2,14 @@
 // Licensed under GPLv2 or any later version
 // Refer to the misc/licenses/gplv2.txt file included.
 
+#include <algorithm>
 #include <cmath>
 #include <mutex>
 #include "common/settings.h"
 #include "core/3ds.h"
 #include "core/frontend/emu_window.h"
 #include "core/frontend/input.h"
+#include "core/frontend/screen_regions.h"
 
 namespace Frontend {
 /// We need a global touch state that is shared across the different window instances
@@ -114,6 +116,22 @@ void EmuWindow::CreateTouchState() {
 }
 
 bool EmuWindow::TouchPressed(unsigned framebuffer_x, unsigned framebuffer_y) {
+    {
+        // Clicks on Screen Regions overlays are forwarded to the matching bottom-screen point.
+        float region_x, region_y;
+        if (framebuffer_layout.is_rotated &&
+            ScreenRegions::Manager::Instance().MapTouch(
+                framebuffer_layout, static_cast<float>(framebuffer_x),
+                static_cast<float>(framebuffer_y), region_x, region_y)) {
+            std::scoped_lock guard(touch_state->mutex);
+            touch_state->touch_x = std::clamp(region_x, 0.0f, 1.0f);
+            touch_state->touch_y = std::clamp(region_y, 0.0f, 1.0f);
+            touch_state->touch_pressed = true;
+            return true;
+        }
+    }
+    if (ScreenRegions::Manager::Instance().HideBottom())
+        return false;
     if (!framebuffer_layout.IsWithinTouchscreen(framebuffer_x, framebuffer_y))
         return false;
     Settings::StereoRenderOption render_3d_mode = get3DMode();
@@ -162,6 +180,16 @@ void EmuWindow::TouchReleased() {
 void EmuWindow::TouchMoved(unsigned framebuffer_x, unsigned framebuffer_y) {
     if (!touch_state->touch_pressed)
         return;
+
+    float region_x, region_y;
+    if (framebuffer_layout.is_rotated &&
+        ScreenRegions::Manager::Instance().MapTouch(framebuffer_layout,
+                                                    static_cast<float>(framebuffer_x),
+                                                    static_cast<float>(framebuffer_y), region_x,
+                                                    region_y)) {
+        TouchPressed(framebuffer_x, framebuffer_y);
+        return;
+    }
 
     if (!framebuffer_layout.IsWithinTouchscreen(framebuffer_x, framebuffer_y))
         std::tie(framebuffer_x, framebuffer_y) = ClipToTouchScreen(framebuffer_x, framebuffer_y);
