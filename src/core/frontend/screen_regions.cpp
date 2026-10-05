@@ -380,10 +380,13 @@ Common::Rectangle<float> Manager::ToFramebuffer(const Layout::FramebufferLayout&
                                                 const Rect& r, bool window_space) const {
     float ox, oy, sx, sy;
     if (window_space) {
-        ox = 0.0f;
-        oy = 0.0f;
-        sx = static_cast<float>(layout.width) / canvas_w;
-        sy = static_cast<float>(layout.height) / canvas_h;
+        // Fit the canvas into the window with a uniform scale (no stretching on
+        // ultrawide / 16:10 displays) and centre it.
+        const float scale = std::min(static_cast<float>(layout.width) / canvas_w,
+                                     static_cast<float>(layout.height) / canvas_h);
+        sx = sy = scale;
+        ox = (static_cast<float>(layout.width) - canvas_w * scale) * 0.5f;
+        oy = (static_cast<float>(layout.height) - canvas_h * scale) * 0.5f;
     } else {
         const auto& top = layout.top_screen;
         ox = static_cast<float>(top.left);
