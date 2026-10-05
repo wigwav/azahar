@@ -56,7 +56,23 @@ u32 ParseColor(const std::string& s) {
 }
 
 /// u16:0x08001234   u32:[0x00500000]+0x20   u8:[[0x00500000]+4]+0x1C   or plain number
-bool ParseBinding(const std::string& s, Binding& b) {
+bool ParseBinding(const std::string& in, Binding& b) {
+    std::string s = in;
+    const auto cmp = s.find_first_of("<>");
+    if (cmp != std::string::npos && cmp > 0) {
+        b.cmp = s[cmp];
+        b.cmp_value = std::stoll(s.substr(cmp + 1), nullptr, 0);
+        s = s.substr(0, cmp);
+    }
+    if (s.rfind("pix:", 0) == 0) {
+        const auto comma = s.find(',');
+        b.constant = false;
+        b.probe = true;
+        b.probe_x = static_cast<u32>(std::stoul(s.substr(4, comma - 4)));
+        b.probe_y = static_cast<u32>(std::stoul(s.substr(comma + 1)));
+        Probes::Instance().Request(b.probe_x, b.probe_y);
+        return true;
+    }
     const auto colon = s.find(':');
     if (colon == std::string::npos) {
         b.constant = true;
@@ -104,7 +120,55 @@ bool EvalExpr(const std::string& e, size_t& pos, Core::System& system,
 
 } // Anonymous namespace
 
+Probes& Probes::Instance() {
+    static Probes instance;
+    return instance;
+}
+
+void Probes::Request(u32 x, u32 y) {
+    std::scoped_lock lock{mutex};
+    values.try_emplace(y << 16 | x, 0);
+}
+
+std::vector<std::pair<u32, u32>> Probes::Requests() const {
+    std::scoped_lock lock{mutex};
+    std::vector<std::pair<u32, u32>> out;
+    for (const auto& [key, v] : values) {
+        out.emplace_back(key & 0xFFFF, key >> 16);
+    }
+    return out;
+}
+
+void Probes::Set(u32 x, u32 y, u32 luminance) {
+    std::scoped_lock lock{mutex};
+    values[y << 16 | x] = luminance;
+}
+
+u32 Probes::Get(u32 x, u32 y) const {
+    std::scoped_lock lock{mutex};
+    const auto it = values.find(y << 16 | x);
+    return it == values.end() ? 0 : it->second;
+}
+
+static s64 ReadRaw(const Binding& b, Core::System& system);
+
 s64 Binding::Read(Core::System& system) const {
+    const s64 v = probe ? static_cast<s64>(Probes::Instance().Get(probe_x, probe_y))
+                        : ReadRaw(*this, system);
+    if (cmp == '<') {
+        return v < cmp_value ? 1 : 0;
+    }
+    if (cmp == '>') {
+        return v > cmp_value ? 1 : 0;
+    }
+    return v;
+}
+
+static s64 ReadRaw(const Binding& b, Core::System& system) {
+    const auto& constant = b.constant;
+    const auto& value = b.value;
+    const auto& expr = b.expr;
+    const auto& size = b.size;
     if (constant) {
         return value;
     }

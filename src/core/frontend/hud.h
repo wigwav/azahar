@@ -32,10 +32,31 @@ struct Image {
     std::vector<u8> pixels;
 };
 
-/// Value source: a constant or a guest memory read (optionally through a pointer chain).
+/// Bottom-screen pixel probes: the HUD requests pixels, the renderer fills in their
+/// luminance (0..255) from the live bottom screen each few frames.
+class Probes {
+public:
+    static Probes& Instance();
+    void Request(u32 x, u32 y);
+    std::vector<std::pair<u32, u32>> Requests() const;
+    void Set(u32 x, u32 y, u32 luminance);
+    u32 Get(u32 x, u32 y) const;
+
+private:
+    mutable std::mutex mutex;
+    std::map<u32, u32> values; ///< key = y << 16 | x
+};
+
+/// Value source: a constant, a guest memory read (optionally through a pointer chain),
+/// or a bottom-screen pixel probe ("pix:X,Y"). An optional "<N" / ">N" suffix turns the
+/// value into a 0/1 comparison result.
 struct Binding {
     bool constant = true;
     s64 value = 0;
+    bool probe = false;
+    u32 probe_x = 0, probe_y = 0;
+    char cmp = 0;                 ///< '<', '>' or 0
+    s64 cmp_value = 0;
     std::string expr;             ///< address expression, e.g. "[0x00500000]+0x20"
     u32 size = 2;                 ///< 1, 2 or 4 bytes for the final read
     s64 Read(Core::System& system) const;

@@ -68,6 +68,7 @@ private:
     void ApplySecondLayerOpacity(float opacity = 1.0f);
     void DrawScreenRegions(const Layout::FramebufferLayout& layout);
     void DrawHud(const Layout::FramebufferLayout& layout);
+    void ReadProbes();
     void ResetSecondLayerOpacity();
     void DrawBottomScreen(const Layout::FramebufferLayout& layout,
                           const Common::Rectangle<u32>& bottom_screen);
@@ -96,6 +97,8 @@ private:
     OGLFramebuffer screenshot_framebuffer;
     std::array<OGLSampler, 2> samplers;
     OGLTexture hud_texture;
+    OGLFramebuffer probe_fbo;
+    u32 probe_frame = 0;
     u64 hud_version = ~0ULL;
 
     // Display information for top and bottom screens respectively

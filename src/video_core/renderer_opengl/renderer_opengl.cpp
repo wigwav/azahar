@@ -6,6 +6,7 @@
 #include "common/microprofile.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include <algorithm>
 #include "core/frontend/emu_window.h"
 #include "core/frontend/screen_regions.h"
 #include "core/frontend/framebuffer_layout.h"
@@ -744,9 +745,59 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
             DrawBottomScreen(layout, additional_screen);
         }
     }
+    ReadProbes();
     DrawScreenRegions(layout);
     DrawHud(layout);
     ResetSecondLayerOpacity();
+}
+
+/**
+ * Samples requested bottom-screen pixels (HUD "pix:" bindings) from the live screen texture.
+ */
+void RendererOpenGL::ReadProbes() {
+    auto& probes = ScreenRegions::Probes::Instance();
+    const auto requests = probes.Requests();
+    if (requests.empty() || (++probe_frame & 3) != 0) {
+        return;
+    }
+    const ScreenInfo& info = screen_infos[2];
+    if (info.display_texture == 0) {
+        return;
+    }
+    if (probe_fbo.handle == 0) {
+        probe_fbo.Create();
+    }
+    const auto& tc = info.display_texcoords;
+    const GLuint prev_read = state.draw.read_framebuffer;
+    const GLuint prev_tex = state.texture_units[0].texture_2d;
+
+    state.texture_units[0].texture_2d = info.display_texture;
+    state.draw.read_framebuffer = probe_fbo.handle;
+    state.Apply();
+    glActiveTexture(GL_TEXTURE0);
+    GLint tex_w = 0, tex_h = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_w);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &tex_h);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           info.display_texture, 0);
+    if (tex_w > 0 && tex_h > 0 &&
+        glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        for (const auto& [x, y] : requests) {
+            const float fx = (static_cast<float>(x) + 0.5f) / 320.0f;
+            const float fy = (static_cast<float>(y) + 0.5f) / 240.0f;
+            const float s_coord = tc.bottom + (tc.top - tc.bottom) * fy;
+            const float t_coord = tc.left + (tc.right - tc.left) * fx;
+            const GLint px = std::clamp(static_cast<GLint>(s_coord * tex_w), 0, tex_w - 1);
+            const GLint py = std::clamp(static_cast<GLint>(t_coord * tex_h), 0, tex_h - 1);
+            u8 rgba[4]{};
+            glReadPixels(px, py, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            probes.Set(x, y, (rgba[0] * 299u + rgba[1] * 587u + rgba[2] * 114u) / 1000u);
+        }
+    }
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    state.draw.read_framebuffer = prev_read;
+    state.texture_units[0].texture_2d = prev_tex;
+    state.Apply();
 }
 
 /**
