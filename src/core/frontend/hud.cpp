@@ -177,7 +177,9 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             }
             const std::string k = t[i].substr(0, eq);
             const std::string v = t[i].substr(eq + 1);
-            if (k == "opacity") {
+            if (k == "names" || k == "lookup") {
+                e.lookup = v;
+            } else if (k == "opacity") {
                 e.opacity = std::clamp(std::stof(v), 0.0f, 1.0f);
             } else if (k == "v" || k == "value" || k == "max") {
                 Binding b;
@@ -207,6 +209,7 @@ void Hud::SetDefinition(const std::vector<HudDef>& new_defs, const std::string& 
     defs = new_defs;
     asset_dir = dir;
     images.clear();
+    lookups.clear();
     font_loaded = false;
     last_profile.clear();
     last_values.clear();
@@ -260,6 +263,26 @@ const Image* Hud::GetImage(const std::string& file) {
     }
     auto& slot = images[file] = std::move(img);
     return slot.width ? &slot : nullptr;
+}
+
+const std::vector<std::string>& Hud::GetLookup(const std::string& file) {
+    auto it = lookups.find(file);
+    if (it != lookups.end()) {
+        return it->second;
+    }
+    std::vector<std::string> lines;
+    std::string data;
+    if (FileUtil::ReadFileToString(true, asset_dir + file, data) > 0) {
+        std::istringstream in(data);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(line);
+        }
+    }
+    return lookups[file] = std::move(lines);
 }
 
 bool Hud::Update(Core::System& system, const std::string& active_profile) {
@@ -340,9 +363,15 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<s64>>& valu
             std::string s = e.text;
             for (size_t v = 0; v < values[i].size(); ++v) {
                 const std::string key = "{" + std::to_string(v) + "}";
+                std::string repl = std::to_string(values[i][v]);
+                if (v == 0 && !e.lookup.empty()) {
+                    const auto& list = GetLookup(e.lookup);
+                    const s64 idx = values[i][v];
+                    repl = idx >= 0 && idx < static_cast<s64>(list.size()) ? list[idx] : "";
+                }
                 size_t p;
                 while ((p = s.find(key)) != std::string::npos) {
-                    s.replace(p, key.size(), std::to_string(values[i][v]));
+                    s.replace(p, key.size(), repl);
                 }
             }
             if (LoadFont()) {

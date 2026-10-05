@@ -53,6 +53,7 @@ struct Element {
     int align = 0;              ///< -1 left, 0 left, 1 centre, 2 right
     std::vector<Binding> values;///< Text: template values; Bar: [value, max]
     Binding visible;            ///< element shown when non-zero (constant 1 by default)
+    std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
 };
 
 struct HudDef {
@@ -94,6 +95,8 @@ private:
     std::vector<HudDef> defs;
     std::string asset_dir;
     std::map<std::string, Image> images;
+    std::map<std::string, std::vector<std::string>> lookups;
+    const std::vector<std::string>& GetLookup(const std::string& file);
     Image font_atlas;
     std::map<int, Glyph> glyphs;
     int font_line = 64;
