@@ -62,6 +62,8 @@ void Manager::Clear() {
     overlay_profile.clear();
     profiles.clear();
     rules.clear();
+    hud_defs.clear();
+    hud.SetDefinition({}, "");
     manual_index = -1;
     overlay_on = false;
     auto_profile.clear();
@@ -74,15 +76,28 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
         return false;
     }
 
-    enum class Section { Global, Profile, Auto } section = Section::Global;
+    enum class Section { Global, Profile, Auto, Hud } section = Section::Global;
     Profile* current = nullptr;
     std::string line;
     int line_no = 0;
     while (std::getline(file, line)) {
         ++line_no;
-        const auto comment = line.find_first_of("#;");
-        if (comment != std::string::npos) {
-            line.resize(comment);
+        {
+            // Comments: lines starting with '#' or ';', or text after " #" / " ;"
+            // (colours like #FF0000 inside HUD lines are preceded by a space too, so only
+            // treat "# " (hash followed by space) or ';' as a comment marker).
+            const auto t = line.find_first_not_of(" \t");
+            if (t != std::string::npos && (line[t] == '#' || line[t] == ';')) {
+                line.clear();
+            }
+            const auto c1 = line.find(" # ");
+            if (c1 != std::string::npos) {
+                line.resize(c1);
+            }
+            const auto c2 = line.find(" ; ");
+            if (c2 != std::string::npos) {
+                line.resize(c2);
+            }
         }
         line = Trim(line);
         if (line.empty()) {
@@ -95,6 +110,10 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
             if (lower == "auto") {
                 section = Section::Auto;
                 current = nullptr;
+            } else if (lower.rfind("hud", 0) == 0) {
+                section = Section::Hud;
+                current = nullptr;
+                hud_defs.push_back(HudDef{Trim(header.substr(3)), {}});
             } else if (lower.rfind("profile", 0) == 0) {
                 section = Section::Profile;
                 profiles.push_back(Profile{Trim(header.substr(7)), {}, true});
@@ -103,6 +122,17 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
                 LOG_WARNING(Frontend, "screen_regions:{}: unknown section [{}]", line_no, header);
                 section = Section::Global;
                 current = nullptr;
+            }
+            continue;
+        }
+
+        if (section == Section::Hud) {
+            Element element;
+            std::string error;
+            if (Hud::ParseElement(line, element, error)) {
+                hud_defs.back().elements.push_back(std::move(element));
+            } else {
+                LOG_WARNING(Frontend, "screen_regions:{}: {}", line_no, error);
             }
             continue;
         }
@@ -217,6 +247,9 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
     if (default_profile.empty() && !profiles.empty()) {
         default_profile = profiles.front().name;
     }
+    hud.SetDefinition(hud_defs, fmt::format("{}screen_regions/{:016X}/",
+                                            FileUtil::GetUserPath(FileUtil::UserPath::LoadDir),
+                                            title_id));
     texture_seen.clear();
     for (const auto& rule : rules) {
         for (const u64 hash : rule.textures) {
@@ -289,6 +322,8 @@ void Manager::Update(Core::System& system) {
 
     if (!file_enabled || rules.empty()) {
         auto_profile.clear();
+        const Profile* p = file_enabled && user_enabled ? CurrentProfile() : nullptr;
+        hud.Update(system, p ? p->name : std::string{});
         return;
     }
 
@@ -344,6 +379,12 @@ void Manager::Update(Core::System& system) {
         }
     }
     auto_profile = selected;
+    if (user_enabled) {
+        const Profile* p = CurrentProfile();
+        hud.Update(system, p ? p->name : std::string{});
+    } else {
+        hud.Update(system, std::string{});
+    }
 }
 
 void Manager::NoteTexture(u64 hash) {
@@ -522,6 +563,19 @@ std::string Manager::StatusText() const {
     const auto* p = CurrentProfile();
     return fmt::format("Screen regions: {}{}{}", manual_index < 0 ? "auto/" : "manual/",
                        p ? p->name : "none", overlay_on ? " + " + overlay_profile : "");
+}
+
+} // namespace ScreenRegions
+
+namespace ScreenRegions {
+
+std::shared_ptr<const Image> Manager::HudCanvas(u64& version) const {
+    return hud.Canvas(version);
+}
+
+Common::Rectangle<float> Manager::CanvasRect(const Layout::FramebufferLayout& layout) const {
+    std::scoped_lock lock{mutex};
+    return ToFramebuffer(layout, Rect{0, 0, canvas_w, canvas_h}, true);
 }
 
 } // namespace ScreenRegions

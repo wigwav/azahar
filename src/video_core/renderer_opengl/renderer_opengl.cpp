@@ -745,7 +745,57 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
         }
     }
     DrawScreenRegions(layout);
+    DrawHud(layout);
     ResetSecondLayerOpacity();
+}
+
+/**
+ * Draws the native HD HUD canvas produced by Screen Regions (straight alpha).
+ */
+void RendererOpenGL::DrawHud(const Layout::FramebufferLayout& layout) {
+    auto& regions = ScreenRegions::Manager::Instance();
+    u64 version = 0;
+    const auto canvas = regions.HudCanvas(version);
+    if (!canvas || canvas->pixels.empty()) {
+        return;
+    }
+    if (hud_texture.handle == 0) {
+        hud_texture.Create();
+        hud_version = ~0ULL;
+    }
+    state.texture_units[0].texture_2d = hud_texture.handle;
+    state.texture_units[0].sampler = samplers[1].handle;
+    state.Apply();
+    if (version != hud_version) {
+        glActiveTexture(GL_TEXTURE0);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, canvas->width, canvas->height, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, canvas->pixels.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        hud_version = version;
+    }
+    const auto r = regions.CanvasRect(layout);
+    const std::array<ScreenRectVertex, 4> vertices = {{
+        ScreenRectVertex(r.left, r.top, 0.0f, 0.0f),
+        ScreenRectVertex(r.right, r.top, 1.0f, 0.0f),
+        ScreenRectVertex(r.left, r.bottom, 0.0f, 1.0f),
+        ScreenRectVertex(r.right, r.bottom, 1.0f, 1.0f),
+    }};
+    state.blend.src_rgb_func = GL_SRC_ALPHA;
+    state.blend.dst_rgb_func = GL_ONE_MINUS_SRC_ALPHA;
+    state.blend.src_a_func = GL_ONE;
+    state.blend.dst_a_func = GL_ONE_MINUS_SRC_ALPHA;
+    glUniform1i(uniform_layer, 0);
+    const float w = r.right - r.left, h = r.bottom - r.top;
+    glUniform4f(uniform_i_resolution, static_cast<float>(canvas->width),
+                static_cast<float>(canvas->height), 1.0f / canvas->width, 1.0f / canvas->height);
+    glUniform4f(uniform_o_resolution, w, h, 1.0f / w, 1.0f / h);
+    state.Apply();
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    state.texture_units[0].texture_2d = 0;
+    state.texture_units[0].sampler = 0;
+    state.Apply();
 }
 
 /**

@@ -19,6 +19,7 @@
 #include <vector>
 #include "common/common_types.h"
 #include "common/math_util.h"
+#include "core/frontend/hud.h"
 
 namespace Core {
 class System;
@@ -100,6 +101,10 @@ public:
 
     std::string StatusText() const;
 
+    /// Current HUD canvas (may be null) and its version; plus where to draw it.
+    std::shared_ptr<const Image> HudCanvas(u64& version) const;
+    Common::Rectangle<float> CanvasRect(const Layout::FramebufferLayout& layout) const;
+
 private:
     Manager() = default;
 
@@ -128,6 +133,8 @@ private:
     std::string overlay_profile;
     std::vector<Profile> profiles;
     std::vector<Rule> rules;
+    std::vector<HudDef> hud_defs;
+    Hud hud;
 
     // Runtime state
     bool user_enabled = true;
