@@ -1,0 +1,43 @@
+name: single-screen-release
+
+# Publishes the Windows (MXE) build of the single-screen branch as a public
+# GitHub release so it can be downloaded without signing in.
+on:
+  workflow_run:
+    workflows: [citra-build]
+    types: [completed]
+    branches: [single-screen]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-mxe
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build
+      - name: Package
+        run: |
+          cd build
+          ls -la
+          # The artifact may already contain an archive; otherwise zip the folder.
+          if ls *.zip >/dev/null 2>&1; then cp *.zip ../azahar-single-screen-windows.zip;
+          elif ls *.7z >/dev/null 2>&1; then cp *.7z ../azahar-single-screen-windows.7z;
+          else zip -r ../azahar-single-screen-windows.zip .; fi
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: single-screen-latest
+          name: Single-screen build (latest)
+          body: "Automated build of ${{ github.event.workflow_run.head_sha }} from the single-screen branch."
+          prerelease: true
+          make_latest: false
+          files: azahar-single-screen-windows.*
