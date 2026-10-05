@@ -58,17 +58,19 @@ u32 ParseColor(const std::string& s) {
 /// u16:0x08001234   u32:[0x00500000]+0x20   u8:[[0x00500000]+4]+0x1C   or plain number
 bool ParseBinding(const std::string& in, Binding& b) {
     std::string s = in;
-    const auto cmp = s.find_first_of("<>");
+    const auto cmp = s.find_first_of("<>=!&");
     if (cmp != std::string::npos && cmp > 0) {
         b.cmp = s[cmp];
         b.cmp_value = std::stoll(s.substr(cmp + 1), nullptr, 0);
         s = s.substr(0, cmp);
     }
-    if (s.rfind("pix:", 0) == 0) {
+    if (s.rfind("pix:", 0) == 0 || s.rfind("pixg:", 0) == 0) {
+        const auto colon = s.find(':');
         const auto comma = s.find(',');
         b.constant = false;
         b.probe = true;
-        b.probe_x = static_cast<u32>(std::stoul(s.substr(4, comma - 4)));
+        b.probe_mode = s[3] == 'g' ? 1 : 0;
+        b.probe_x = static_cast<u32>(std::stoul(s.substr(colon + 1, comma - colon - 1)));
         b.probe_y = static_cast<u32>(std::stoul(s.substr(comma + 1)));
         Probes::Instance().Request(b.probe_x, b.probe_y);
         return true;
@@ -139,9 +141,9 @@ std::vector<std::pair<u32, u32>> Probes::Requests() const {
     return out;
 }
 
-void Probes::Set(u32 x, u32 y, u32 luminance) {
+void Probes::Set(u32 x, u32 y, u32 rgb) {
     std::scoped_lock lock{mutex};
-    values[y << 16 | x] = luminance;
+    values[y << 16 | x] = rgb;
 }
 
 u32 Probes::Get(u32 x, u32 y) const {
@@ -153,10 +155,25 @@ u32 Probes::Get(u32 x, u32 y) const {
 static s64 ReadRaw(const Binding& b, Core::System& system);
 
 s64 Binding::Read(Core::System& system) const {
-    const s64 v = probe ? static_cast<s64>(Probes::Instance().Get(probe_x, probe_y))
-                        : ReadRaw(*this, system);
+    s64 v = 0;
+    if (probe) {
+        const u32 rgb = Probes::Instance().Get(probe_x, probe_y);
+        const s64 r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
+        v = probe_mode == 1 ? g - std::max(r, bl) : (r * 299 + g * 587 + bl * 114) / 1000;
+    } else {
+        v = ReadRaw(*this, system);
+    }
     if (cmp == '<') {
         return v < cmp_value ? 1 : 0;
+    }
+    if (cmp == '=') {
+        return v == cmp_value ? 1 : 0;
+    }
+    if (cmp == '!') {
+        return v != cmp_value ? 1 : 0;
+    }
+    if (cmp == '&') {
+        return (v & cmp_value) != 0 ? 1 : 0;
     }
     if (cmp == '>') {
         return v > cmp_value ? 1 : 0;
@@ -196,6 +213,14 @@ static s64 ReadRaw(const Binding& b, Core::System& system) {
         return memory.Read32(addr);
     default:
         return memory.Read16(addr);
+    }
+}
+
+bool Hud::ParseValue(const std::string& text, Binding& out) {
+    try {
+        return ParseBinding(text, out);
+    } catch (const std::exception&) {
+        return false;
     }
 }
 
@@ -254,6 +279,16 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
                 e.values.push_back(b);
             } else if (k == "if") {
                 if (!ParseBinding(v, e.visible)) {
+                    error = "bad binding '" + v + "'";
+                    return false;
+                }
+            } else if (k == "and") {
+                if (!ParseBinding(v, e.visible2)) {
+                    error = "bad binding '" + v + "'";
+                    return false;
+                }
+            } else if (k == "hold") {
+                if (!ParseBinding(v, e.hold)) {
                     error = "bad binding '" + v + "'";
                     return false;
                 }
@@ -371,7 +406,13 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     std::vector<bool> visible(def->elements.size());
     for (size_t i = 0; i < def->elements.size(); ++i) {
         const auto& e = def->elements[i];
-        visible[i] = e.visible.Read(system) != 0;
+        const bool can_hold = active_profile == last_profile && i < last_visible.size();
+        if (can_hold && e.hold.Read(system) != 0) {
+            visible[i] = last_visible[i];
+        } else {
+            visible[i] = e.visible.Read(system) != 0 &&
+                         (e.visible2.constant ? true : e.visible2.Read(system) != 0);
+        }
         for (const auto& b : e.values) {
             values[i].push_back(b.Read(system));
         }

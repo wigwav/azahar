@@ -746,8 +746,13 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
         }
     }
     ReadProbes();
-    DrawScreenRegions(layout);
-    DrawHud(layout);
+    if (ScreenRegions::Manager::Instance().HudUnder()) {
+        DrawHud(layout);
+        DrawScreenRegions(layout);
+    } else {
+        DrawScreenRegions(layout);
+        DrawHud(layout);
+    }
     ResetSecondLayerOpacity();
 }
 
@@ -815,7 +820,7 @@ void RendererOpenGL::ReadProbes() {
             const GLint py = std::clamp(static_cast<GLint>(t_coord * tex_h), 0, tex_h - 1);
             u8 rgba[4]{};
             glReadPixels(px, py, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-            probes.Set(x, y, (rgba[0] * 299u + rgba[1] * 587u + rgba[2] * 114u) / 1000u);
+            probes.Set(x, y, (u32{rgba[0]} << 16) | (u32{rgba[1]} << 8) | rgba[2]);
         }
     }
     glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
@@ -905,7 +910,15 @@ void RendererOpenGL::DrawScreenRegions(const Layout::FramebufferLayout& layout) 
             ScreenRectVertex(r.x + r.w, r.y + r.h, u1, v1),
         }};
 
-        ApplySecondLayerOpacity(r.opacity);
+        if (r.screen) {
+            // Screen blend: dst + src * (1 - dst) == src + dst * (1 - src).
+            state.blend.src_rgb_func = GL_ONE;
+            state.blend.dst_rgb_func = GL_ONE_MINUS_SRC_COLOR;
+            state.blend.src_a_func = GL_ONE;
+            state.blend.dst_a_func = GL_ONE_MINUS_SRC_ALPHA;
+        } else {
+            ApplySecondLayerOpacity(r.opacity);
+        }
         glUniform4f(uniform_i_resolution,
                     static_cast<float>(screen_info.texture.width * scale_factor),
                     static_cast<float>(screen_info.texture.height * scale_factor),

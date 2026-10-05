@@ -179,6 +179,7 @@ void Dump(Core::System& system, const std::string& path) {
         }
     }
     ranges.emplace_back(0x30000000, 0x3000000);
+    ranges.emplace_back(0x1F000000, 0x600000); // VRAM
     put32(static_cast<u32>(ranges.size()));
     for (const auto& [va, size] : ranges) {
         put32(va);
@@ -294,6 +295,15 @@ int main(int argc, char** argv) {
                     m.Write16(addr, static_cast<u16>(val));
                 else
                     m.Write32(addr, val);
+            } else if (cmd == "wfile") {
+                // wfile <addr> <path>: copy a host file into guest memory
+                std::string a, path;
+                in >> a >> path;
+                const u32 addr = static_cast<u32>(std::stoul(a, nullptr, 0));
+                std::string data;
+                FileUtil::ReadFileToString(false, path, data);
+                system.Memory().WriteBlock(addr, data.data(), data.size());
+                std::printf("wrote %zu bytes at %08x\n", data.size(), addr);
             } else if (cmd == "quit") {
                 break;
             } else {

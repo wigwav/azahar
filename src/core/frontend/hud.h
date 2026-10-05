@@ -32,14 +32,14 @@ struct Image {
     std::vector<u8> pixels;
 };
 
-/// Bottom-screen pixel probes: the HUD requests pixels, the renderer fills in their
-/// luminance (0..255) from the live bottom screen each few frames.
+/// Bottom-screen pixel probes: the HUD requests pixels, the renderer fills in their colour
+/// (packed 0xRRGGBB) from the live bottom screen each few frames.
 class Probes {
 public:
     static Probes& Instance();
     void Request(u32 x, u32 y);
     std::vector<std::pair<u32, u32>> Requests() const;
-    void Set(u32 x, u32 y, u32 luminance);
+    void Set(u32 x, u32 y, u32 rgb);
     u32 Get(u32 x, u32 y) const;
 
 private:
@@ -54,8 +54,9 @@ struct Binding {
     bool constant = true;
     s64 value = 0;
     bool probe = false;
+    int probe_mode = 0;           ///< 0: luminance ("pix:"), 1: green excess ("pixg:")
     u32 probe_x = 0, probe_y = 0;
-    char cmp = 0;                 ///< '<', '>' or 0
+    char cmp = 0;                 ///< '<', '>', '=', '!' (not equal), '&' (any bit) or 0
     s64 cmp_value = 0;
     std::string expr;             ///< address expression, e.g. "[0x00500000]+0x20"
     u32 size = 2;                 ///< 1, 2 or 4 bytes for the final read
@@ -74,6 +75,8 @@ struct Element {
     int align = 0;              ///< -1 left, 0 left, 1 centre, 2 right
     std::vector<Binding> values;///< Text: template values; Bar: [value, max]
     Binding visible;            ///< element shown when non-zero (constant 1 by default)
+    Binding visible2;           ///< optional second condition ("and=")
+    Binding hold;               ///< while non-zero, keep the previous visibility ("hold=")
     std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
 };
 
@@ -86,6 +89,9 @@ class Hud {
 public:
     /// Parses one "hud = ..." element line; returns false on syntax error.
     static bool ParseElement(const std::string& line, Element& out, std::string& error);
+
+    /// Parses a value binding ("u32:[0x500000]+4", "pix:10,4<50", "1", ...).
+    static bool ParseValue(const std::string& text, Binding& out);
 
     void SetDefinition(const std::vector<HudDef>& defs, const std::string& asset_dir);
 

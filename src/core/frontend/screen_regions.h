@@ -41,12 +41,17 @@ struct Region {
     float opacity = 1.0f; ///< 0..1
     bool touch = true;    ///< Mouse clicks inside dst are forwarded as touches at src
     int space = -1;       ///< -1: file default, 0: top-screen space, 1: window canvas space
+    Binding visible;      ///< drawn only while this evaluates non-zero ("if=")
+    Binding visible2;     ///< optional second condition ("and=")
+    bool screen = false;  ///< blend=screen: black is transparent, light colours add
+    bool shown = true;    ///< last evaluation of `visible` (emulation thread)
 };
 
 struct Profile {
     std::string name;
     std::vector<Region> regions;
     bool hide_bottom = true; ///< Suppress the normal bottom screen while this profile is active
+    bool hud_under = false;  ///< Draw this profile's HUD beneath its regions (panels behind crops)
     bool has_top = false;    ///< Override the top screen placement while active
     Rect top;                ///< Top screen rectangle in window canvas space
 };
@@ -68,6 +73,7 @@ struct DrawRegion {
     float x, y, w, h;                  ///< Framebuffer pixels
     float opacity;
     bool touch;
+    bool screen; ///< Screen blend (black is transparent) instead of normal alpha blending
 };
 
 class Manager {
@@ -82,6 +88,7 @@ public:
 
     bool IsActive() const;
     bool HideBottom() const;
+    bool HudUnder() const;
 
     /// Returns the layout with the active profile's top-screen placement applied.
     Layout::FramebufferLayout Apply(const Layout::FramebufferLayout& layout) const;
@@ -165,6 +172,7 @@ private:
     std::vector<u8> capture_rgb;
     bool capture_ready = false;
     void WriteRecord(Core::System& system, const std::string& profile);
+    void EvaluateRegions(Core::System& system);
 
 };
 

@@ -179,6 +179,8 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
             } else if (section == Section::Profile && current) {
                 if (key == "hide_bottom") {
                     current->hide_bottom = value != "0" && Lower(value) != "false";
+                } else if (key == "hud_under") {
+                    current->hud_under = value != "0" && Lower(value) != "false";
                 } else if (key == "top") {
                     // top = x y w h  (window canvas space)
                     std::istringstream in(value);
@@ -193,6 +195,8 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
                         throw std::invalid_argument("missing ->");
                     }
                     Region region;
+                    region.visible.value = 1; // shown unless an if= binding says otherwise
+                    region.visible2.value = 1;
                     std::istringstream src(value.substr(0, arrow));
                     std::istringstream dst(value.substr(arrow + 2));
                     if (!ParseRect(src, region.src) || !ParseRect(dst, region.dst)) {
@@ -210,6 +214,16 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
                             region.touch = oval != "0";
                         } else if (okey == "space") {
                             region.space = Lower(oval) == "window" ? 1 : 0;
+                        } else if (okey == "blend") {
+                            region.screen = Lower(oval) == "screen";
+                        } else if (okey == "if") {
+                            if (!Hud::ParseValue(oval, region.visible)) {
+                                throw std::invalid_argument("bad if= binding");
+                            }
+                        } else if (okey == "and") {
+                            if (!Hud::ParseValue(oval, region.visible2)) {
+                                throw std::invalid_argument("bad and= binding");
+                            }
                         }
                     }
                     current->regions.push_back(region);
@@ -341,6 +355,7 @@ void Manager::Update(Core::System& system) {
     if (!file_enabled || rules.empty()) {
         auto_profile.clear();
         const Profile* p = file_enabled && user_enabled ? CurrentProfile() : nullptr;
+        EvaluateRegions(system);
         hud.Update(system, p ? p->name : std::string{});
         return;
     }
@@ -420,6 +435,7 @@ void Manager::Update(Core::System& system) {
             capture_pending = true;
         }
     }
+    EvaluateRegions(system);
     if (user_enabled) {
         const Profile* p = CurrentProfile();
         hud.Update(system, p ? p->name : std::string{});
@@ -498,6 +514,19 @@ void Manager::WriteRecord(Core::System& system, const std::string& profile) {
     }).detach();
 }
 
+void Manager::EvaluateRegions(Core::System& system) {
+    const Profile* current = user_enabled ? CurrentProfile() : nullptr;
+    const Profile* overlay = user_enabled ? OverlayProfile() : nullptr;
+    for (auto& profile : profiles) {
+        if (&profile != current && &profile != overlay) {
+            continue;
+        }
+        for (auto& r : profile.regions) {
+            r.shown = r.visible.Read(system) != 0 && r.visible2.Read(system) != 0;
+        }
+    }
+}
+
 void Manager::NoteTexture(u64 hash) {
     for (auto& [h, frame] : texture_seen) {
         if (h == hash) {
@@ -535,6 +564,12 @@ const Profile* Manager::OverlayProfile() const {
 bool Manager::IsActive() const {
     std::scoped_lock lock{mutex};
     return file_enabled && user_enabled && !profiles.empty();
+}
+
+bool Manager::HudUnder() const {
+    std::scoped_lock lock{mutex};
+    const auto* current = file_enabled && user_enabled ? CurrentProfile() : nullptr;
+    return current && current->hud_under;
 }
 
 bool Manager::HideBottom() const {
@@ -607,13 +642,17 @@ std::vector<DrawRegion> Manager::Resolve(const Layout::FramebufferLayout& layout
             return;
         }
         for (const auto& r : profile->regions) {
+            if (!r.shown) {
+                continue;
+            }
             const bool window_space = r.space < 0 ? space_window : r.space == 1;
             const auto dst = ToFramebuffer(adjusted, r.dst, window_space);
             out.push_back(DrawRegion{
                 Common::Rectangle<float>{r.src.x / BottomWidth, r.src.y / BottomHeight,
                                          (r.src.x + r.src.w) / BottomWidth,
                                          (r.src.y + r.src.h) / BottomHeight},
-                dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top, r.opacity, r.touch});
+                dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top, r.opacity, r.touch,
+                r.screen});
         }
     };
     append(CurrentProfile());
