@@ -124,6 +124,7 @@ private:
     std::string file_path;
     std::string file_contents;
     u32 frame_counter = 0;
+    const void* last_process = nullptr;
 
     // Definition
     bool file_enabled = false;

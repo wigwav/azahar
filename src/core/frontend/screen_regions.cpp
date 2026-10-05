@@ -277,7 +277,8 @@ void Manager::Update(Core::System& system) {
     const bool check_file = title_changed || reload_requested.exchange(false) ||
                             (++frame_counter % 60) == 0;
 
-    if (title_changed) {
+    if (title_changed || process.get() != last_process) {
+        last_process = process.get();
         // Log the process memory map (virtual -> FCRAM offset) once per title. Used to
         // translate addresses found in save-state snapshots into game addresses.
         const u8* fcram = system.Memory().GetFCRAMPointer(0);
