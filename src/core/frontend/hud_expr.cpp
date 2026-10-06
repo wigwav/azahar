@@ -320,6 +320,9 @@ struct Env {
             }
             if (c == 0xF8) {
                 const u8 code = static_cast<u8>(Read(addr + i + 1, 1, false));
+                if (code == 0x02) {
+                    break; // end of message
+                }
                 if (code == 0x01) {
                     if (cur == line) {
                         break;
