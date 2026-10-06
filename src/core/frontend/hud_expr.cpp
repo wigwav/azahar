@@ -436,12 +436,51 @@ u32 Obj(const Env& e) {
         const s64 n1 = e.Read(o + 0x5B8 + 0x64, 4, false);
         return n0 >= 1 && n0 <= 8 && n1 >= 0 && n1 <= 8;
     };
+    // The object starts with a widget header whose vtables are fixed in the game code.
+    auto sig = [&](u32 o) {
+        return e.Read(o + 0x0C, 4, false) == 0x5288C8 && e.Read(o + 0x18, 4, false) == 0x5289DC &&
+               e.Read(o + 0x24, 4, false) == 0x528C34 && sane(o) &&
+               e.Read(o + 0x113FC, 4, false) <= 1;
+    };
     const u32 o1 = static_cast<u32>(e.Read(b + 0x2F8, 4, false));
     if (sane(o1)) {
         return o1;
     }
     const u32 o2 = static_cast<u32>(e.Read(b + 0x2E8, 4, false)) - 0x180;
-    return sane(o2) ? o2 : 0;
+    if (sane(o2)) {
+        return o2;
+    }
+    // Neither pointer is set in some battles: find the object by its header (cached; the scan
+    // runs at most twice a second while it is missing).
+    static std::mutex mtx;
+    static u32 cached = 0;
+    static std::chrono::steady_clock::time_point last_scan{};
+    std::scoped_lock lock{mtx};
+    if (cached && sig(cached)) {
+        return cached;
+    }
+    cached = 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_scan < std::chrono::milliseconds(500)) {
+        return 0;
+    }
+    last_scan = now;
+    std::vector<u8> buf(0x10000);
+    for (u32 base = 0x08400000; base < 0x08C00000; base += 0x10000) {
+        if (!e.Valid(base, 0x10000)) {
+            continue;
+        }
+        e.ctx.system.Memory().ReadBlock(*e.process, base, buf.data(), buf.size());
+        for (u32 off = 0; off + 4 <= buf.size(); off += 4) {
+            u32 v;
+            std::memcpy(&v, buf.data() + off, 4);
+            if (v == 0x5288C8 && base + off >= 0x0C && sig(base + off - 0x0C)) {
+                cached = base + off - 0x0C;
+                return cached;
+            }
+        }
+    }
+    return 0;
 }
 constexpr u32 BattleMgrPtr = 0x0057113C;  // -> battle manager; live unit records inside it
 constexpr u32 UnitBase = 0x200E6, UnitStride = 0x408;

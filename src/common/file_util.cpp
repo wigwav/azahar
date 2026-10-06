@@ -1395,6 +1395,24 @@ bool IOFile::Open() {
 #else
     m_file = FOPEN(filename.c_str(), openmode.c_str());
     m_good = m_file != nullptr;
+    // Headless tooling: a save state made on another machine names that machine's game file.
+    if (!m_good) {
+        std::string lower = filename;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        const bool is_game = lower.ends_with(".3ds") || lower.ends_with(".cci") ||
+                             lower.ends_with(".cxi") || lower.ends_with(".z3ds") ||
+                             lower.ends_with(".zcci") || lower.ends_with(".zcxi") ||
+                             (lower.ends_with(".app") &&
+                              lower.find("00040000/0019a200") != std::string::npos);
+        if (std::getenv("SR_GAME_FILE") && !is_game) {
+            std::fprintf(stderr, "IOFile: cannot open %s\n", filename.c_str());
+        }
+        if (const char* game = std::getenv("SR_GAME_FILE"); is_game && game && *game) {
+            std::fprintf(stderr, "IOFile: %s missing, using %s\n", filename.c_str(), game);
+            m_file = FOPEN(game, openmode.c_str());
+            m_good = m_file != nullptr;
+        }
+    }
 #endif
 
     return m_good;

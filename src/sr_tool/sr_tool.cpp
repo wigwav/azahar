@@ -23,6 +23,7 @@
 #include "common/common_types.h"
 #include "common/file_util.h"
 #include "common/logging/backend.h"
+#include "common/logging/filter.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
@@ -321,6 +322,12 @@ int main(int argc, char** argv) {
     Common::Log::Initialize();
     Common::Log::SetColorConsoleBackendEnabled(true);
     Common::Log::Start();
+    {
+        Common::Log::Filter filter;
+        filter.ParseFilterString(std::getenv("SR_LOG") ? std::getenv("SR_LOG")
+                                                       : "*:Info HW.Memory:Critical");
+        Common::Log::SetGlobalFilter(filter);
+    }
     FileUtil::SetUserPath(std::string(argv[1]) + "/");
 
     Settings::values.graphics_api = Settings::GraphicsAPI::Software;
@@ -361,6 +368,11 @@ int main(int argc, char** argv) {
                 in >> slot;
                 system.LoadState(slot);
                 std::printf("state %u loaded\n", slot);
+            } else if (cmd == "save") {
+                u32 slot = 3;
+                in >> slot;
+                system.SaveState(slot);
+                std::printf("state %u saved\n", slot);
             } else if (cmd == "run") {
                 u64 n = 1;
                 in >> n;
