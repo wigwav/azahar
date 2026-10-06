@@ -725,6 +725,21 @@ Value Call(const ExprNode& n, const Env& env) {
     if (f == "smt4a_save") return Smt4a::Save(env);
     if (f == "smt4a_obj") return Smt4a::Obj(env);
     if (f == "smt4a_rec") return Smt4a::Rec(env, arg(0));
+    if (f == "smt4a_prec") {
+        // party member k's stock record from the save alone (outside battle)
+        const u32 save = Smt4a::Save(env);
+        const s64 k = arg(0);
+        if (!save || k < 1 || k > 3) {
+            return 0;
+        }
+        for (u32 i = 0; i < Smt4a::StockMax; ++i) {
+            const u32 r = save + Smt4a::StockBase + i * Smt4a::StockStride;
+            if (env.Read(r + 0x66, 2, false) == 0x100 + (k - 1)) {
+                return static_cast<s64>(r);
+            }
+        }
+        return 0;
+    }
     if (f == "smt4a_hp") return Smt4a::Stat(env, arg(0), 0);
     if (f == "smt4a_mp") return Smt4a::Stat(env, arg(0), 1);
     if (f == "smt4a_maxhp") return Smt4a::Stat(env, arg(0), 2);
