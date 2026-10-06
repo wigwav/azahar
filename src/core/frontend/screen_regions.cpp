@@ -481,7 +481,7 @@ void Manager::WriteRecord(Core::System& system, const std::string& profile) {
             ranges.emplace_back(vma.base, vma.size);
         }
     }
-    ranges.emplace_back(0x30C00000, 0x200000);
+    ranges.emplace_back(0x30C00000, 0x1400000); // linear heap: save data, UI and message buffers
     put32(static_cast<u32>(ranges.size()));
     for (const auto& [va, size] : ranges) {
         put32(va);
