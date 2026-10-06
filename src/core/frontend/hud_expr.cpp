@@ -419,10 +419,29 @@ constexpr u32 NanashiRec = 0x90;           // Nanashi's skill block (same layout
 u32 Save(const Env& e) {
     return static_cast<u32>(e.Read(SaveDataPtr, 4, false));
 }
+/// The battle UI object. Two game builds lay the battle task out differently: the object is at
+/// [b+0x2F8], or [b+0x2E8] points 0x180 bytes into it. A candidate is accepted when its
+/// per-member command counts (+0x5B8, stride 0x64) look sane.
 u32 Obj(const Env& e) {
     const u32 a = static_cast<u32>(e.Read(BattleTask, 4, false));
     const u32 b = a ? static_cast<u32>(e.Read(a + 0x384, 4, false)) : 0;
-    return b ? static_cast<u32>(e.Read(b + 0x2F8, 4, false)) : 0;
+    if (!b) {
+        return 0;
+    }
+    auto sane = [&](u32 o) {
+        if (o < 0x08000000 || o >= 0x10000000) {
+            return false;
+        }
+        const s64 n0 = e.Read(o + 0x5B8, 4, false);
+        const s64 n1 = e.Read(o + 0x5B8 + 0x64, 4, false);
+        return n0 >= 1 && n0 <= 8 && n1 >= 0 && n1 <= 8;
+    };
+    const u32 o1 = static_cast<u32>(e.Read(b + 0x2F8, 4, false));
+    if (sane(o1)) {
+        return o1;
+    }
+    const u32 o2 = static_cast<u32>(e.Read(b + 0x2E8, 4, false)) - 0x180;
+    return sane(o2) ? o2 : 0;
 }
 constexpr u32 BattleMgrPtr = 0x0057113C;  // -> battle manager; live unit records inside it
 constexpr u32 UnitBase = 0x200E6, UnitStride = 0x408;
