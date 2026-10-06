@@ -712,6 +712,41 @@ Value Call(const ExprNode& n, const Env& env) {
         return static_cast<s64>(it != seen.end() &&
                                 now - it->second < std::chrono::milliseconds(arg(1)));
     }
+    if (f == "track" || f == "trackage") {
+        // track(key, value, ms): the summed change of value over a burst of changes, while the
+        // last change is younger than ms (0 otherwise). trackage(key): ms since that change.
+        struct T {
+            s64 last = 0;
+            s64 accum = 0;
+            std::chrono::steady_clock::time_point t{};
+            bool init = false;
+        };
+        static std::mutex m;
+        static std::map<std::string, T> tracks;
+        const auto now = std::chrono::steady_clock::now();
+        const std::string key = argv(0).Text();
+        std::scoped_lock lock{m};
+        auto& t = tracks[key];
+        if (f == "trackage") {
+            if (!t.init || t.t == std::chrono::steady_clock::time_point{}) {
+                return 1000000;
+            }
+            return std::chrono::duration_cast<std::chrono::milliseconds>(now - t.t).count();
+        }
+        const s64 v = arg(1);
+        const auto window = std::chrono::milliseconds(arg(2));
+        if (!t.init) {
+            t.init = true;
+            t.last = v;
+            return 0;
+        }
+        if (v != t.last) {
+            t.accum = (now - t.t < window ? t.accum : 0) + (v - t.last);
+            t.t = now;
+            t.last = v;
+        }
+        return (t.t != std::chrono::steady_clock::time_point{} && now - t.t < window) ? t.accum : 0;
+    }
     if (f == "has") return static_cast<s64>(argv(0).Text().find(argv(1).Text()) != std::string::npos);
     if (f == "pix") {
         // bottom-screen pixel 0xRRGGBB (sampled by the renderer)

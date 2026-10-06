@@ -369,6 +369,12 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
                     return false;
                 }
                 e.has_offset = true;
+            } else if (k == "fade") {
+                if (!ParseBinding(v, e.fade)) {
+                    error = "bad binding '" + v + "'";
+                    return false;
+                }
+                e.has_fade = true;
             } else if (k == "fit") {
                 e.fit = std::stof(v);
             } else if (k == "crop") {
@@ -457,7 +463,7 @@ void Hud::WorkerLoop() {
             canvas.reset();
             ++canvas_version;
         } else {
-            Rasterise((*job.defs)[job.index], job.values, job.visible, job.offsets);
+            Rasterise((*job.defs)[job.index], job.values, job.visible, job.offsets, job.fades);
         }
         {
             std::scoped_lock lock{job_mutex};
@@ -580,6 +586,7 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     std::vector<std::vector<Value>> values(def->elements.size());
     std::vector<bool> visible(def->elements.size());
     offsets.assign(def->elements.size(), {0.0f, 0.0f});
+    fades.assign(def->elements.size(), 1.0f);
     for (size_t i = 0; i < def->elements.size(); ++i) {
         const auto& e = def->elements[i];
         const bool can_hold = active_profile == last_profile && i < last_visible.size();
@@ -605,6 +612,9 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         if (e.has_offset) {
             offsets[i] = {static_cast<float>(e.ox.Eval(ctx).n), static_cast<float>(e.oy.Eval(ctx).n)};
         }
+        if (e.has_fade) {
+            fades[i] = std::clamp(static_cast<float>(e.fade.Eval(ctx).n) / 100.0f, 0.0f, 1.0f);
+        }
         for (const auto& b : e.values) {
             values[i].push_back(b.Eval(ctx));
         }
@@ -618,10 +628,11 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         }
     }
     if (active_profile == last_profile && values == last_values && visible == last_visible &&
-        offsets == last_offsets) {
+        offsets == last_offsets && fades == last_fades) {
         return false;
     }
     last_offsets = offsets;
+    last_fades = fades;
     last_profile = active_profile;
     last_values = values;
     last_visible = visible;
@@ -633,6 +644,7 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         job.values = std::move(values);
         job.visible = std::move(visible);
         job.offsets = offsets;
+        job.fades = fades;
         job.asset_dir = asset_dir;
         pending = std::move(job); // only the newest state matters
     }
@@ -691,7 +703,8 @@ std::string Format(const std::string& tmpl, const std::vector<Value>& values) {
 
 void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
                     const std::vector<bool>& visible,
-                    const std::vector<std::pair<float, float>>& offs) {
+                    const std::vector<std::pair<float, float>>& offs,
+                    const std::vector<float>& fades_in) {
     auto img = std::make_shared<Image>();
     img->width = CanvasWidth;
     img->height = CanvasHeight;
@@ -705,6 +718,12 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& va
         if (i < offs.size()) {
             e.x += offs[i].first;
             e.y += offs[i].second;
+        }
+        if (i < fades_in.size()) {
+            e.opacity *= fades_in[i];
+            if (e.opacity <= 0.0f) {
+                continue;
+            }
         }
         switch (e.type) {
         case Element::Type::Rect:

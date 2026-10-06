@@ -114,6 +114,8 @@ struct Element {
     std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
     float fit = 0;              ///< Text: shrink to fit this width (0 = off)
     Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
+    Binding fade;               ///< opacity 0..100 from an expression ("fade==EXPR")
+    bool has_fade = false;
     bool has_offset = false;
 };
 
@@ -162,7 +164,8 @@ private:
     const Image* GetImage(const std::string& file);
     void Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
                    const std::vector<bool>& visible,
-                   const std::vector<std::pair<float, float>>& offs);
+                   const std::vector<std::pair<float, float>>& offs,
+                   const std::vector<float>& fades);
 
     /// Rasterising a 1920x1080 canvas takes tens of milliseconds, so it runs on a worker
     /// thread; the emulation thread only evaluates bindings and queues the newest state.
@@ -172,6 +175,7 @@ private:
         std::vector<std::vector<Value>> values;
         std::vector<bool> visible;
         std::vector<std::pair<float, float>> offsets;
+        std::vector<float> fades;
         std::string asset_dir;
         bool clear = false; ///< publish an empty canvas
     };
@@ -206,6 +210,8 @@ private:
     std::vector<std::vector<Value>> last_values;
     std::vector<std::pair<float, float>> offsets;
     std::vector<std::pair<float, float>> last_offsets;
+    std::vector<float> fades;
+    std::vector<float> last_fades;
     std::vector<bool> last_visible;
     std::vector<std::chrono::steady_clock::time_point> last_true;
     /// Captures persisted to <asset_dir>/cache once stable: name -> (version, updates seen, saved)
