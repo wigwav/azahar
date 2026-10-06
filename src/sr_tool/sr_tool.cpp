@@ -1,3 +1,4 @@
+#include <chrono>
 // Headless research tool for Screen Regions: boots a title with the software renderer,
 // loads a save state and runs a script (button presses, frame steps, RAM/screen dumps).
 //
@@ -27,6 +28,7 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/hle/kernel/thread.h"
 #include "core/arm/arm_interface.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
@@ -238,6 +240,8 @@ void ServiceCaptures(Core::System& system) {
 }
 
 /// hud <ini> <assets_dir> <hud_name> <out.rgba>: render a [hud NAME] section over the current state
+ScreenRegions::Hud g_hud;
+
 void RenderHud(Core::System& system, const std::string& ini, const std::string& assets,
                const std::string& name, const std::string& out) {
     std::ifstream in(ini);
@@ -278,7 +282,7 @@ void RenderHud(Core::System& system, const std::string& ini, const std::string& 
             std::fprintf(stderr, "element error: %s: %s\n", line.c_str(), error.c_str());
         }
     }
-    static ScreenRegions::Hud hud;
+    auto& hud = g_hud;
     hud.SetDefinition({def}, assets + "/");
     hud.Update(system, name);
     {
@@ -303,6 +307,7 @@ void RenderHud(Core::System& system, const std::string& ini, const std::string& 
     hud.Update(system, name);
     ServiceCaptures(system);
     hud.Update(system, name);
+    hud.Flush();
     u64 version = 0;
     const auto canvas = hud.Canvas(version);
     FileUtil::IOFile f(out, "wb");
@@ -373,6 +378,51 @@ int main(int argc, char** argv) {
                 in >> slot;
                 system.SaveState(slot);
                 std::printf("state %u saved\n", slot);
+            } else if (cmd == "pc") {
+                auto& core = system.GetRunningCore();
+                std::printf("pc=%08x lr=%08x sp=%08x frame=%llu ticks=%llu\n", core.GetPC(),
+                            core.GetReg(14), core.GetReg(13),
+                            static_cast<unsigned long long>(system.GPU().Renderer().GetCurrentFrame()),
+                            static_cast<unsigned long long>(system.CoreTiming().GetTicks()));
+            } else if (cmd == "mem") {
+                // mem <addr> <size> <path>: raw guest memory to a host file
+                std::string a, n, path;
+                in >> a >> n >> path;
+                const u32 addr = static_cast<u32>(std::stoul(a, nullptr, 0));
+                const u32 size = static_cast<u32>(std::stoul(n, nullptr, 0));
+                std::vector<u8> buf(size);
+                system.Memory().ReadBlock(*system.Kernel().GetCurrentProcess(), addr, buf.data(), size);
+                FileUtil::IOFile f(path, "wb");
+                f.WriteBytes(buf.data(), buf.size());
+            } else if (cmd == "hudbench") {
+                // hudbench <n>: after a 'hud' command, run n frames timing Update (eval+raster)
+                u64 n = 60;
+                std::string prof;
+                in >> prof >> n;
+                double total = 0, worst = 0;
+                int rasters = 0;
+                for (u64 k = 0; k < n; ++k) {
+                    RunFrames(system, 1);
+                    const auto t0 = std::chrono::steady_clock::now();
+                    const bool changed = g_hud.Update(system, prof);
+                    const double ms = std::chrono::duration<double, std::milli>(
+                                          std::chrono::steady_clock::now() - t0)
+                                          .count();
+                    total += ms;
+                    worst = std::max(worst, ms);
+                    rasters += changed;
+                }
+                std::printf("hudbench %llu frames: avg %.2f ms, worst %.2f ms, %d rasters\n",
+                            static_cast<unsigned long long>(n), total / n, worst, rasters);
+            } else if (cmd == "threads") {
+                for (u32 c = 0; c < 4; ++c) {
+                    for (const auto& t : system.Kernel().GetThreadManager(c).GetThreadList()) {
+                        std::printf("core%u tid=%u status=%d pc=%08x lr=%08x prio=%u r0=%08x r4=%08x sp=%08x\n", c,
+                                    t->thread_id, static_cast<int>(t->status),
+                                    t->context.cpu_registers[15], t->context.cpu_registers[14],
+                                    t->current_priority, t->context.cpu_registers[0], t->context.cpu_registers[4], t->context.cpu_registers[13]);
+                    }
+                }
             } else if (cmd == "run") {
                 u64 n = 1;
                 in >> n;

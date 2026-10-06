@@ -415,12 +415,63 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
     }
 }
 
+Hud::Hud() : worker([this] { WorkerLoop(); }) {}
+
+Hud::~Hud() {
+    {
+        std::scoped_lock lock{job_mutex};
+        quit = true;
+    }
+    job_cv.notify_all();
+    if (worker.joinable()) {
+        worker.join();
+    }
+}
+
+void Hud::Flush() {
+    std::unique_lock lock{job_mutex};
+    idle_cv.wait(lock, [this] { return !pending && !busy; });
+}
+
+void Hud::WorkerLoop() {
+    for (;;) {
+        Job job;
+        {
+            std::unique_lock lock{job_mutex};
+            job_cv.wait(lock, [this] { return quit || pending.has_value(); });
+            if (quit) {
+                return;
+            }
+            job = std::move(*pending);
+            pending.reset();
+            busy = true;
+        }
+        if (job.asset_dir != worker_asset_dir) {
+            worker_asset_dir = job.asset_dir;
+            images.clear();
+            font_loaded = false;
+            glyphs.clear();
+        }
+        if (job.clear || !job.defs || job.index >= job.defs->size()) {
+            std::scoped_lock lock{canvas_mutex};
+            canvas.reset();
+            ++canvas_version;
+        } else {
+            Rasterise((*job.defs)[job.index], job.values, job.visible, job.offsets);
+        }
+        {
+            std::scoped_lock lock{job_mutex};
+            busy = false;
+        }
+        idle_cv.notify_all();
+    }
+}
+
 void Hud::SetDefinition(const std::vector<HudDef>& new_defs, const std::string& dir) {
     defs = new_defs;
+    defs_shared = std::make_shared<const std::vector<HudDef>>(new_defs);
     asset_dir = dir;
-    images.clear();
     lookups.clear();
-    font_loaded = false;
     last_profile.clear();
     last_values.clear();
 }
@@ -505,9 +556,14 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     if (!def) {
         if (!last_profile.empty()) {
             last_profile.clear();
-            std::scoped_lock lock{canvas_mutex};
-            canvas.reset();
-            ++canvas_version;
+            {
+                std::scoped_lock lock{job_mutex};
+                Job job;
+                job.clear = true;
+                job.asset_dir = asset_dir;
+                pending = std::move(job);
+            }
+            job_cv.notify_one();
             return true;
         }
         return false;
@@ -569,7 +625,18 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     last_profile = active_profile;
     last_values = values;
     last_visible = visible;
-    Rasterise(*def, values, visible);
+    {
+        std::scoped_lock lock{job_mutex};
+        Job job;
+        job.defs = defs_shared;
+        job.index = static_cast<size_t>(def - defs.data());
+        job.values = std::move(values);
+        job.visible = std::move(visible);
+        job.offsets = offsets;
+        job.asset_dir = asset_dir;
+        pending = std::move(job); // only the newest state matters
+    }
+    job_cv.notify_one();
     return true;
 }
 
@@ -596,7 +663,7 @@ void Hud::PersistCapture(const std::string& name) {
     FileUtil::CreateFullPath(dir);
     Frontend::ImageInterface encoder;
     if (encoder.EncodePNG(dir + name + ".png", cap->width, cap->height, cap->pixels)) {
-        images.erase("cache/" + name + ".png");
+        // the rasteriser reloads it the next time the asset directory changes
     }
 }
 
@@ -623,7 +690,8 @@ std::string Format(const std::string& tmpl, const std::vector<Value>& values) {
 } // namespace
 
 void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
-                    const std::vector<bool>& visible) {
+                    const std::vector<bool>& visible,
+                    const std::vector<std::pair<float, float>>& offs) {
     auto img = std::make_shared<Image>();
     img->width = CanvasWidth;
     img->height = CanvasHeight;
@@ -634,9 +702,9 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& va
             continue;
         }
         Element e = def.elements[i];
-        if (i < offsets.size()) {
-            e.x += offsets[i].first;
-            e.y += offsets[i].second;
+        if (i < offs.size()) {
+            e.x += offs[i].first;
+            e.y += offs[i].second;
         }
         switch (e.type) {
         case Element::Type::Rect:

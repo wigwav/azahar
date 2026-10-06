@@ -464,7 +464,7 @@ u32 Obj(const Env& e) {
     }
     cached = 0;
     const auto now = std::chrono::steady_clock::now();
-    if (now - last_scan < std::chrono::milliseconds(500)) {
+    if (now - last_scan < std::chrono::milliseconds(1500)) {
         return 0;
     }
     last_scan = now;

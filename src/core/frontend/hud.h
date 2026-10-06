@@ -13,9 +13,12 @@
 #pragma once
 
 #include <chrono>
+#include <condition_variable>
+#include <thread>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 #include "common/common_types.h"
@@ -122,6 +125,14 @@ struct HudDef {
 
 class Hud {
 public:
+    Hud();
+    ~Hud();
+    Hud(const Hud&) = delete;
+    Hud& operator=(const Hud&) = delete;
+
+    /// Blocks until the rasteriser has drawn everything requested so far (tools/tests).
+    void Flush();
+
     /// Parses one "hud = ..." element line; returns false on syntax error.
     static bool ParseElement(const std::string& line, Element& out, std::string& error);
 
@@ -150,7 +161,30 @@ private:
     bool LoadFont();
     const Image* GetImage(const std::string& file);
     void Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& values,
-                   const std::vector<bool>& visible);
+                   const std::vector<bool>& visible,
+                   const std::vector<std::pair<float, float>>& offs);
+
+    /// Rasterising a 1920x1080 canvas takes tens of milliseconds, so it runs on a worker
+    /// thread; the emulation thread only evaluates bindings and queues the newest state.
+    struct Job {
+        std::shared_ptr<const std::vector<HudDef>> defs;
+        size_t index = 0;
+        std::vector<std::vector<Value>> values;
+        std::vector<bool> visible;
+        std::vector<std::pair<float, float>> offsets;
+        std::string asset_dir;
+        bool clear = false; ///< publish an empty canvas
+    };
+    void WorkerLoop();
+    std::thread worker;
+    std::mutex job_mutex;
+    std::condition_variable job_cv;
+    std::condition_variable idle_cv;
+    std::optional<Job> pending;
+    bool busy = false;
+    bool quit = false;
+    std::string worker_asset_dir;
+    std::shared_ptr<const std::vector<HudDef>> defs_shared;
     void DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, float opacity);
     void DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
                    float opacity, const float* crop = nullptr);

@@ -154,6 +154,8 @@ private:
     bool overlay_on = false;
     int manual_index = -1; ///< -1 = automatic selection
     std::string auto_profile;
+    std::string candidate_profile;
+    int candidate_frames = 0;
     std::atomic<bool> reload_requested{false};
 
     // Texture-rule tracking (emulation thread only)

@@ -415,7 +415,22 @@ void Manager::Update(Core::System& system) {
             break;
         }
     }
-    auto_profile = selected;
+    // Debounce: a different layout must win for several consecutive frames before it takes
+    // over, so a menu texture drawn for one frame cannot flip the whole screen.
+    if (selected == auto_profile) {
+        candidate_frames = 0;
+    } else if (selected == candidate_profile) {
+        if (++candidate_frames >= 8 || auto_profile.empty()) {
+            auto_profile = selected;
+            candidate_frames = 0;
+        }
+    } else {
+        candidate_profile = selected;
+        candidate_frames = 1;
+        if (auto_profile.empty()) {
+            auto_profile = selected;
+        }
+    }
     if (record_max > 0 && record_count < record_max) {
         const Profile* rp = CurrentProfile();
         const std::string rname = rp ? rp->name : std::string{};
