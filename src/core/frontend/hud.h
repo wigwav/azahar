@@ -98,6 +98,7 @@ struct Element {
     u32 color = 0xFFFFFFFF;     ///< RRGGBBAA
     u32 color2 = 0x000000A0;    ///< bar background
     float opacity = 1.0f;
+    float crop[4] = {0, 0, 1, 1}; ///< Image: source rect as fractions ("crop=x,y,w,h")
     std::string image;          ///< image file (Image)
     std::string text;           ///< text template; {0},{1}.. are replaced by values (Text)
     float size = 32.0f;         ///< text pixel height
@@ -152,7 +153,7 @@ private:
                    const std::vector<bool>& visible);
     void DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, float opacity);
     void DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
-                   float opacity);
+                   float opacity, const float* crop = nullptr);
     void DrawText(Image& dst, const std::string& text, float x, float y, float size, int align,
                   u32 rgba, float opacity);
     float TextWidth(const std::string& text, float size);

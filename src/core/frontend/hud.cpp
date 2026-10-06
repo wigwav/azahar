@@ -371,6 +371,12 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
                 e.has_offset = true;
             } else if (k == "fit") {
                 e.fit = std::stof(v);
+            } else if (k == "crop") {
+                std::istringstream cs(v);
+                std::string part;
+                for (int ci = 0; ci < 4 && std::getline(cs, part, ','); ++ci) {
+                    e.crop[ci] = std::stof(part);
+                }
             } else if (k == "opacity") {
                 e.opacity = std::clamp(std::stof(v), 0.0f, 1.0f);
             } else if (k == "v" || k == "value" || k == "max") {
@@ -651,7 +657,7 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& va
             const std::string file =
                 e.image.find('{') != std::string::npos ? Format(e.image, values[i]) : e.image;
             if (const Image* src = GetImage(file)) {
-                DrawImage(*img, *src, e.x, e.y, e.w, e.h, e.opacity);
+                DrawImage(*img, *src, e.x, e.y, e.w, e.h, e.opacity, e.crop);
             }
             break;
         }
@@ -724,18 +730,20 @@ void Hud::DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, flo
 }
 
 void Hud::DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
-                    float opacity) {
+                    float opacity, const float* crop) {
+    static constexpr float full[4] = {0, 0, 1, 1};
+    const float* cr = crop ? crop : full;
     const int x0 = std::max(0, static_cast<int>(x));
     const int y0 = std::max(0, static_cast<int>(y));
     const int x1 = std::min<int>(dst.width, static_cast<int>(x + w));
     const int y1 = std::min<int>(dst.height, static_cast<int>(y + h));
     for (int yy = y0; yy < y1; ++yy) {
-        const float v = ((yy + 0.5f - y) / h) * src.height - 0.5f;
+        const float v = (cr[1] + ((yy + 0.5f - y) / h) * cr[3]) * src.height - 0.5f;
         const int sy0 = std::clamp(static_cast<int>(std::floor(v)), 0, (int)src.height - 1);
         const int sy1 = std::min(sy0 + 1, (int)src.height - 1);
         const float fy = std::clamp(v - std::floor(v), 0.0f, 1.0f);
         for (int xx = x0; xx < x1; ++xx) {
-            const float u = ((xx + 0.5f - x) / w) * src.width - 0.5f;
+            const float u = (cr[0] + ((xx + 0.5f - x) / w) * cr[2]) * src.width - 0.5f;
             const int sx0 = std::clamp(static_cast<int>(std::floor(u)), 0, (int)src.width - 1);
             const int sx1 = std::min(sx0 + 1, (int)src.width - 1);
             const float fx = std::clamp(u - std::floor(u), 0.0f, 1.0f);
