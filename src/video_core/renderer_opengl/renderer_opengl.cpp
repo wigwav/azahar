@@ -91,6 +91,13 @@ RendererOpenGL::RendererOpenGL(Core::System& system, Pica::PicaCore& pica_,
 RendererOpenGL::~RendererOpenGL() = default;
 
 void RendererOpenGL::SwapBuffers() {
+    {
+        auto fb_addr = [&](u32 id) {
+            const auto& fb = pica.regs.framebuffer_config[id];
+            return static_cast<u32>(fb.active_fb == 0 ? fb.address_left1 : fb.address_left2);
+        };
+        ScreenRegions::DrawTrace::Instance().Frame(fb_addr(0), fb_addr(1));
+    }
     system.perf_stats->StartSwap();
     ScreenRegions::Manager::Instance().Update(system);
     // Maintain the rasterizer's state as a priority

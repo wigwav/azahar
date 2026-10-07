@@ -13,6 +13,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdio>
 #include <condition_variable>
 #include <thread>
 #include <map>
@@ -74,6 +75,24 @@ private:
     std::map<std::string, Request> pending;
     std::map<std::string, std::pair<std::shared_ptr<const Image>, u64>> store;
     u64 counter = 0;
+};
+
+/// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on exists, one line
+/// per GPU draw (render target, textures, blending, vertex count) and per displayed frame goes to
+/// <log>/drawtrace.txt (capped).
+class DrawTrace {
+public:
+    static DrawTrace& Instance();
+    bool Active() const { return active; }
+    void Frame(u32 top_addr, u32 bottom_addr);
+    void Line(const std::string& line);
+
+private:
+    bool active = false;
+    u64 frame = 0;
+    u64 lines = 0;
+    std::FILE* file = nullptr;
+    std::mutex mutex;
 };
 
 /// Value source: a constant, a guest memory read (optionally through a pointer chain),
