@@ -11,6 +11,7 @@
 #include "core/hle/service/plgldr/plgldr.h"
 #include "core/loader/loader.h"
 #include "video_core/debug_utils/debug_utils.h"
+#include "core/frontend/hud.h"
 #include "video_core/gpu.h"
 #include "video_core/gpu_debugger.h"
 #include "video_core/gpu_impl.h"
@@ -453,6 +454,14 @@ void GPU::MemoryTransfer() {
     }
 
     MICROPROFILE_SCOPE(GPU_DisplayTransfer);
+    if (ScreenRegions::DrawTrace::Instance().Active()) {
+        ScreenRegions::DrawTrace::Instance().Line(fmt::format(
+            "X in={:08x} out={:08x} in={}x{} out={}x{} tex={} flags={:x}",
+            config.GetPhysicalInputAddress(), config.GetPhysicalOutputAddress(),
+            config.input_width.Value(), config.input_height.Value(), config.output_width.Value(),
+            config.output_height.Value(), static_cast<u32>(config.is_texture_copy.Value()),
+            config.flags));
+    }
 
     // Notify debugger about the display transfer.
     if (impl->debug_context) {

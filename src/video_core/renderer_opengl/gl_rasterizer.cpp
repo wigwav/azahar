@@ -556,9 +556,13 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
     if (ScreenRegions::DrawTrace::Instance().Active()) {
         const auto tex = regs.texturing.GetTextures();
         const auto& ab = regs.framebuffer.output_merger.alpha_blending;
+        const auto vp = regs.rasterizer.GetViewportRect();
         std::string line = fmt::format(
-            "D c={:08x} n={} ab={} eq={} s={} d={} sa={} da={}",
+            "D c={:08x} fb={}x{} vp={},{},{},{} n={} ab={} eq={} s={} d={} sa={} da={}",
             regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+            static_cast<u32>(regs.framebuffer.framebuffer.width.Value()),
+            static_cast<u32>(regs.framebuffer.framebuffer.height.Value()), vp.left, vp.bottom,
+            vp.right, vp.top,
             accelerate ? static_cast<u32>(regs.pipeline.num_vertices)
                        : static_cast<u32>(vertex_batch.size()),
             static_cast<u32>(regs.framebuffer.output_merger.alphablend_enable.Value()),
