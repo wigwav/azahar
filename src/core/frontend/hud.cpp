@@ -142,9 +142,13 @@ void DrawTrace::Frame(u32 top_addr, u32 bottom_addr) {
     std::scoped_lock lock{mutex};
     ++frame;
     if ((frame % 30) == 0) {
-        const bool want = FileUtil::Exists(
-            FileUtil::GetUserPath(FileUtil::UserPath::LoadDir) + "screen_regions/trace.on");
-        if (want && !file && lines < 400000) {
+        std::string flag;
+        FileUtil::ReadFileToString(
+            true, FileUtil::GetUserPath(FileUtil::UserPath::LoadDir) + "screen_regions/trace.on",
+            flag);
+        const bool want = flag.rfind("on", 0) == 0;
+        if (want && !file) {
+            lines = 0; // each switch-on starts a fresh budget
             file = std::fopen((FileUtil::GetUserPath(FileUtil::UserPath::LogDir) + "drawtrace.txt")
                                   .c_str(),
                               "a");
@@ -157,7 +161,7 @@ void DrawTrace::Frame(u32 top_addr, u32 bottom_addr) {
     if (file) {
         std::fprintf(file, "F %llu top=%08x bottom=%08x\n", static_cast<unsigned long long>(frame),
                      top_addr, bottom_addr);
-        if (++lines >= 400000) {
+        if (++lines >= 3000000) {
             std::fclose(file);
             file = nullptr;
             active = false;
@@ -172,7 +176,7 @@ void DrawTrace::Line(const std::string& line) {
     }
     std::fputs(line.c_str(), file);
     std::fputc('\n', file);
-    if (++lines >= 400000) {
+    if (++lines >= 3000000) {
         std::fclose(file);
         file = nullptr;
         active = false;

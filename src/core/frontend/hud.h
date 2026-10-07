@@ -77,7 +77,7 @@ private:
     u64 counter = 0;
 };
 
-/// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on exists, one line
+/// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on starts with "on", one line
 /// per GPU draw (render target, textures, blending, vertex count) and per displayed frame goes to
 /// <log>/drawtrace.txt (capped).
 class DrawTrace {
