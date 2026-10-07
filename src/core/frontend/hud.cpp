@@ -133,6 +133,48 @@ bool EvalExpr(const std::string& e, size_t& pos, Core::System& system,
 
 } // Anonymous namespace
 
+FxLayers& FxLayers::Instance() {
+    static FxLayers instance;
+    return instance;
+}
+
+void FxLayers::Ask(const std::string& name, float x, float y, float w, float h, bool active) {
+    std::scoped_lock lock{mutex};
+    pending[name] = Request{name, x, y, w, h, active, std::chrono::steady_clock::now()};
+}
+
+std::vector<FxLayers::Request> FxLayers::TakeRequests() {
+    std::scoped_lock lock{mutex};
+    std::vector<Request> out;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = pending.begin(); it != pending.end();) {
+        if (now - it->second.asked > std::chrono::milliseconds(250)) {
+            it = pending.erase(it);
+        } else {
+            out.push_back(it->second);
+            ++it;
+        }
+    }
+    return out;
+}
+
+void FxLayers::Store(const std::string& name, Image image) {
+    std::scoped_lock lock{mutex};
+    store[name] = {std::make_shared<const Image>(std::move(image)), ++counter};
+}
+
+std::shared_ptr<const Image> FxLayers::Get(const std::string& name) const {
+    std::scoped_lock lock{mutex};
+    const auto it = store.find(name);
+    return it == store.end() ? nullptr : it->second.first;
+}
+
+u64 FxLayers::Version(const std::string& name) const {
+    std::scoped_lock lock{mutex};
+    const auto it = store.find(name);
+    return it == store.end() ? 0 : it->second.second;
+}
+
 Captures& Captures::Instance() {
     static Captures instance;
     return instance;
@@ -344,6 +386,14 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             e.type = Element::Type::Capture;
             const std::string q = t.at(i++);
             e.image = q[0] == '"' ? q.substr(1) : q;
+            e.x = num(); e.y = num(); e.w = num(); e.h = num();
+        } else if (kind == "fx") {
+            e.type = Element::Type::Fx;
+            const std::string q = t.at(i++);
+            e.image = q[0] == '"' ? q.substr(1) : q;
+            for (float& v : e.src) {
+                v = num();
+            }
             e.x = num(); e.y = num(); e.w = num(); e.h = num();
         } else if (kind == "bar") {
             e.type = Element::Type::Bar;
@@ -589,6 +639,19 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     fades.assign(def->elements.size(), 1.0f);
     for (size_t i = 0; i < def->elements.size(); ++i) {
         const auto& e = def->elements[i];
+        if (e.type == Element::Type::Fx) {
+            const bool armed = e.visible.Eval(ctx).Truthy();
+            const bool active =
+                armed && (e.visible2.constant ? true : e.visible2.Eval(ctx).Truthy());
+            visible[i] = active;
+            if (armed) {
+                FxLayers::Instance().Ask(e.image, e.src[0], e.src[1], e.src[2], e.src[3], active);
+            }
+            if (active) {
+                values[i].push_back(Value(static_cast<s64>(FxLayers::Instance().Version(e.image))));
+            }
+            continue;
+        }
         const bool can_hold = active_profile == last_profile && i < last_visible.size();
         if (can_hold && e.hold.Eval(ctx).Truthy()) {
             visible[i] = last_visible[i];
@@ -749,6 +812,11 @@ void Hud::Rasterise(const HudDef& def, const std::vector<std::vector<Value>>& va
             break;
         }
         case Element::Type::Capture:
+            break;
+        case Element::Type::Fx:
+            if (const auto fx = FxLayers::Instance().Get(e.image); fx && fx->width) {
+                DrawImage(*img, *fx, e.x, e.y, e.w, e.h, e.opacity);
+            }
             break;
         case Element::Type::Bar: {
             DrawRect(*img, e.x, e.y, e.w, e.h, e.color2, e.opacity);

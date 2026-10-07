@@ -103,6 +103,7 @@ private:
     OGLFramebuffer probe_fbo;
     u32 probe_frame = 0;
     std::unordered_map<std::string, u64> capture_sums;
+    std::map<std::string, std::vector<u8>> fx_base; ///< effect layers: snapshot before activation
     u64 hud_version = ~0ULL;
 
     // Display information for top and bottom screens respectively

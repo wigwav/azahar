@@ -76,6 +76,33 @@ private:
     u64 counter = 0;
 };
 
+/// Effect layers: the HUD names a bottom-screen rectangle; while the layer is armed the renderer
+/// keeps a snapshot of it every frame, and while it is active publishes only the pixels that
+/// differ from that snapshot (an animation drawn over a still picture, without the picture).
+class FxLayers {
+public:
+    struct Request {
+        std::string name;
+        float x, y, w, h; ///< bottom-screen pixels (320x240)
+        bool active;
+        std::chrono::steady_clock::time_point asked;
+    };
+    static FxLayers& Instance();
+    /// Called by the HUD every update for each armed layer.
+    void Ask(const std::string& name, float x, float y, float w, float h, bool active);
+    /// Renderer: the layers asked for within the last 250 ms (older ones are dropped).
+    std::vector<Request> TakeRequests();
+    void Store(const std::string& name, Image image);
+    std::shared_ptr<const Image> Get(const std::string& name) const;
+    u64 Version(const std::string& name) const;
+
+private:
+    mutable std::mutex mutex;
+    std::map<std::string, Request> pending;
+    std::map<std::string, std::pair<std::shared_ptr<const Image>, u64>> store;
+    u64 counter = 0;
+};
+
 /// Value source: a constant, a guest memory read (optionally through a pointer chain),
 /// or a bottom-screen pixel probe ("pix:X,Y"). An optional "<N" / ">N" suffix turns the
 /// value into a 0/1 comparison result.
@@ -96,7 +123,7 @@ struct Binding {
 };
 
 struct Element {
-    enum class Type { Rect, Image, Text, Bar, Capture } type = Type::Rect;
+    enum class Type { Rect, Image, Text, Bar, Capture, Fx } type = Type::Rect;
     float x = 0, y = 0, w = 0, h = 0;
     u32 color = 0xFFFFFFFF;     ///< RRGGBBAA
     u32 color2 = 0x000000A0;    ///< bar background
@@ -115,6 +142,7 @@ struct Element {
     float fit = 0;              ///< Text: shrink to fit this width (0 = off)
     Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
     Binding fade;               ///< opacity 0..100 from an expression ("fade==EXPR")
+    float src[4] = {0, 0, 0, 0}; ///< Fx: bottom-screen source rect (if= arms, and= activates)
     bool has_fade = false;
     bool has_offset = false;
 };

@@ -769,7 +769,12 @@ void RendererOpenGL::ReadProbes() {
     if ((probe_frame % 20) == 0) {
         grabs = ScreenRegions::Captures::Instance().TakeRequests();
     }
-    if (!capture && grabs.empty() && (requests.empty() || (probe_frame & 3) != 0)) {
+    const auto fx_requests = ScreenRegions::FxLayers::Instance().TakeRequests();
+    if (fx_requests.empty() && !fx_base.empty()) {
+        fx_base.clear();
+    }
+    if (!capture && grabs.empty() && fx_requests.empty() &&
+        (requests.empty() || (probe_frame & 3) != 0)) {
         return;
     }
     const ScreenInfo& info = screen_infos[2];
@@ -815,6 +820,66 @@ void RendererOpenGL::ReadProbes() {
                 }
             }
             manager.SetBottomCapture(std::move(rgb));
+        }
+        if (!fx_requests.empty()) {
+            // Effect layers: one read of the whole bottom screen, then per layer either refresh
+            // the snapshot (armed) or publish what was drawn over it (active). Only pixels that
+            // got brighter or changed hue are kept, so the portrait itself (and the game's own
+            // dimming between turns) stays transparent while every effect comes through.
+            std::vector<u8> full(static_cast<size_t>(tex_w) * tex_h * 4);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, tex_w, tex_h, GL_RGBA, GL_UNSIGNED_BYTE, full.data());
+            const float scale = std::max(1.0f, static_cast<float>(tex_h) / 320.0f);
+            for (const auto& r : fx_requests) {
+                const u32 ow = static_cast<u32>(std::max(1.0f, r.w * scale));
+                const u32 oh = static_cast<u32>(std::max(1.0f, r.h * scale));
+                std::vector<u8> cur(static_cast<size_t>(ow) * oh * 3);
+                for (u32 yy = 0; yy < oh; ++yy) {
+                    for (u32 xx = 0; xx < ow; ++xx) {
+                        const float fx = (r.x + (xx + 0.5f) / ow * r.w) / 320.0f;
+                        const float fy = (r.y + (yy + 0.5f) / oh * r.h) / 240.0f;
+                        const float sc = tc.bottom + (tc.top - tc.bottom) * fy;
+                        const float tcv = tc.left + (tc.right - tc.left) * fx;
+                        const GLint px = std::clamp(static_cast<GLint>(sc * tex_w), 0, tex_w - 1);
+                        const GLint py = std::clamp(static_cast<GLint>(tcv * tex_h), 0, tex_h - 1);
+                        const u8* src = &full[(static_cast<size_t>(py) * tex_w + px) * 4];
+                        u8* dst = &cur[(static_cast<size_t>(yy) * ow + xx) * 3];
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
+                    }
+                }
+                auto& base = fx_base[r.name];
+                if (!r.active || base.size() != cur.size()) {
+                    base = std::move(cur);
+                    continue;
+                }
+                ScreenRegions::Image out;
+                out.width = ow;
+                out.height = oh;
+                out.pixels.resize(static_cast<size_t>(ow) * oh * 4);
+                for (size_t p = 0, n = static_cast<size_t>(ow) * oh; p < n; ++p) {
+                    const u8* cpx = &cur[p * 3];
+                    const u8* bpx = &base[p * 3];
+                    int up = 0, diff = 0;
+                    for (int ch = 0; ch < 3; ++ch) {
+                        const int d = static_cast<int>(cpx[ch]) - static_cast<int>(bpx[ch]);
+                        up = std::max(up, d);
+                        diff = std::max(diff, d < 0 ? -d : d);
+                    }
+                    // brightening counts fully; a pure darkening (dimming) does not
+                    const int lum_c = cpx[0] * 3 + cpx[1] * 6 + cpx[2];
+                    const int lum_b = bpx[0] * 3 + bpx[1] * 6 + bpx[2];
+                    const int score = lum_c >= lum_b ? diff : up;
+                    const int a = std::clamp((score - 28) * 6, 0, 255);
+                    u8* o = &out.pixels[p * 4];
+                    o[0] = cpx[0];
+                    o[1] = cpx[1];
+                    o[2] = cpx[2];
+                    o[3] = static_cast<u8>(a);
+                }
+                ScreenRegions::FxLayers::Instance().Store(r.name, std::move(out));
+            }
         }
         for (const auto& g : grabs) {
             // Copy a bottom-screen rectangle at the screen's internal resolution.
