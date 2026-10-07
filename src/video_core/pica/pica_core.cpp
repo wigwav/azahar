@@ -8,6 +8,7 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/frontend/hud.h"
 #include "core/memory.h"
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/pica/pica_core.h"
@@ -16,6 +17,38 @@
 #include "video_core/shader/shader.h"
 
 namespace Pica {
+
+namespace {
+/// One trace line per draw (render target, viewport, textures, blending, vertex count).
+void TraceDraw(const Pica::RegsInternal& regs, u32 vertices) {
+    auto& trace = ScreenRegions::DrawTrace::Instance();
+    if (!trace.Active()) {
+        return;
+    }
+    const auto tex = regs.texturing.GetTextures();
+    const auto& ab = regs.framebuffer.output_merger.alpha_blending;
+    const auto vp = regs.rasterizer.GetViewportRect();
+    std::string line = fmt::format(
+        "D c={:08x} fb={}x{} vp={},{},{},{} n={} ab={} eq={} s={} d={} sa={} da={}",
+        regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+        static_cast<u32>(regs.framebuffer.framebuffer.width.Value()),
+        static_cast<u32>(regs.framebuffer.framebuffer.height.Value()), vp.left, vp.bottom, vp.right,
+        vp.top, vertices,
+        static_cast<u32>(regs.framebuffer.output_merger.alphablend_enable.Value()),
+        static_cast<u32>(ab.blend_equation_rgb.Value()),
+        static_cast<u32>(ab.factor_source_rgb.Value()),
+        static_cast<u32>(ab.factor_dest_rgb.Value()), static_cast<u32>(ab.factor_source_a.Value()),
+        static_cast<u32>(ab.factor_dest_a.Value()));
+    for (u32 t = 0; t < tex.size(); ++t) {
+        if (tex[t].enabled) {
+            line += fmt::format(" t{}={:08x}:{}x{}:{}", t, tex[t].config.GetPhysicalAddress(),
+                                tex[t].config.width.Value(), tex[t].config.height.Value(),
+                                static_cast<u32>(tex[t].format));
+        }
+    }
+    trace.Line(line);
+}
+} // namespace
 
 MICROPROFILE_DEFINE(GPU_Drawing, "GPU", "Drawing", MP_RGB(50, 50, 240));
 
@@ -78,6 +111,7 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
         const auto add_triangle = [this](const OutputVertex& v0, const OutputVertex& v1,
                                          const OutputVertex& v2) {
             rasterizer->AddTriangle(v0, v1, v2);
+            fx_capture.Triangle(regs.internal, v0, v1, v2);
         };
         const auto vertex = OutputVertex(regs.internal.rasterizer, buffer);
         primitive_assembler.SubmitVertex(vertex, add_triangle);
@@ -1036,6 +1070,7 @@ void PicaCore::DrawImmediate() {
     geometry_pipeline.SubmitVertex(output);
 
     // Flush the immediate triangle.
+    TraceDraw(regs.internal, 0);
     rasterizer->DrawTriangles();
     immediate.current_attribute = 0;
 
@@ -1046,6 +1081,7 @@ void PicaCore::DrawImmediate() {
 
 void PicaCore::DrawArrays(bool is_indexed) {
     MICROPROFILE_SCOPE(GPU_Drawing);
+    TraceDraw(regs.internal, regs.internal.pipeline.num_vertices);
 
     // Track vertex in the debug recorder.
     if (debug_context) {
@@ -1064,6 +1100,11 @@ void PicaCore::DrawArrays(bool is_indexed) {
         // or disable accelerate draw completely. However, there is not game found yet that does
         // this, so this is left unimplemented for now. Revisit this when an issue is found in
         // games.
+
+        // Bottom-screen draws go through the CPU while the HUD learns or captures effects.
+        if (fx_capture.WantsVertices(regs.internal)) {
+            return false;
+        }
 
         bool accelerate_draw = Settings::values.use_hw_shader && primitive_assembler.IsEmpty();
         const auto topology = primitive_assembler.GetTopology();

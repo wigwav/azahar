@@ -7,6 +7,7 @@
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
 #include "video_core/pica/dirty_regs.h"
+#include "video_core/pica/fx_capture.h"
 #include "video_core/pica/geometry_pipeline.h"
 #include "video_core/pica/packed_attribute.h"
 #include "video_core/pica/primitive_assembly.h"
@@ -402,6 +403,11 @@ public:
 
     RenderPropertiesGuess GuessCmdRenderProperties(PAddr list, u32 size);
 
+    /// The bottom screen was transferred to its display buffer (single-screen HUD effects).
+    void EndBottomFrame() {
+        fx_capture.EndBottomFrame();
+    }
+
 private:
     Memory::MemorySystem& memory;
     VideoCore::RasterizerInterface* rasterizer;
@@ -411,6 +417,7 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
+    FxCapture fx_capture{memory};
 };
 
 #define GPU_REG_INDEX(field_name) (offsetof(Pica::PicaCore::Regs, field_name) / sizeof(u32))

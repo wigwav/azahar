@@ -71,6 +71,7 @@ private:
     void ApplySecondLayerOpacity(float opacity = 1.0f);
     void DrawScreenRegions(const Layout::FramebufferLayout& layout);
     void DrawHud(const Layout::FramebufferLayout& layout);
+    void DrawFx(const Layout::FramebufferLayout& layout);
     void ReadProbes();
     void ResetSecondLayerOpacity();
     void DrawBottomScreen(const Layout::FramebufferLayout& layout,
@@ -100,6 +101,8 @@ private:
     OGLFramebuffer screenshot_framebuffer;
     std::array<OGLSampler, 2> samplers;
     OGLTexture hud_texture;
+    OGLTexture fx_texture;
+    u64 fx_version = ~0ULL;
     OGLFramebuffer probe_fbo;
     u32 probe_frame = 0;
     std::unordered_map<std::string, u64> capture_sums;

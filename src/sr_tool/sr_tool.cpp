@@ -312,7 +312,38 @@ void RenderHud(Core::System& system, const std::string& ini, const std::string& 
     const auto canvas = hud.Canvas(version);
     FileUtil::IOFile f(out, "wb");
     if (canvas) {
-        f.WriteBytes(canvas->pixels.data(), canvas->pixels.size());
+        // preview of the renderer's effect layer pass (premultiplied over straight alpha)
+        std::vector<u8> px = canvas->pixels;
+        u64 fxv = 0;
+        const auto fx = ScreenRegions::FxLayer::Instance().Frame(fxv);
+        const int cw = static_cast<int>(canvas->width), ch = static_cast<int>(canvas->height);
+        for (const auto& b : fx ? ScreenRegions::FxLayer::Instance().Blits()
+                                : std::vector<ScreenRegions::FxLayer::Blit>{}) {
+            for (int y = std::max(0, static_cast<int>(b.dy));
+                 y < std::min(ch, static_cast<int>(b.dy + b.dh)); ++y) {
+                for (int x = std::max(0, static_cast<int>(b.dx));
+                     x < std::min(cw, static_cast<int>(b.dx + b.dw)); ++x) {
+                    const int sx = std::clamp(
+                        static_cast<int>(b.sx + (x - b.dx + 0.5f) / b.dw * b.sw), 0, 319);
+                    const int sy = std::clamp(
+                        static_cast<int>(b.sy + (y - b.dy + 0.5f) / b.dh * b.sh), 0, 239);
+                    const u8* s = &(*fx)[(static_cast<size_t>(sy) * 320 + sx) * 4];
+                    u8* d = &px[(static_cast<size_t>(y) * cw + x) * 4];
+                    const float sa = s[3] / 255.0f;
+                    const float da = d[3] / 255.0f;
+                    const float oa = sa + da * (1.0f - sa);
+                    for (int c = 0; c < 3; ++c) {
+                        const float dc = d[c] / 255.0f * da;
+                        const float oc = std::min(1.0f, s[c] / 255.0f + dc * (1.0f - sa));
+                        d[c] = static_cast<u8>(
+                            oa > 0.0f ? std::min(1.0f, oc / std::max(oa, oc)) * 255.0f : 0.0f);
+                    }
+                    d[3] = static_cast<u8>(std::max(oa, std::max({s[0], s[1], s[2]}) / 255.0f) *
+                                           255.0f);
+                }
+            }
+        }
+        f.WriteBytes(px.data(), px.size());
     }
     std::printf("hud %zu elements -> %s\n", def.elements.size(), out.c_str());
 }
@@ -339,6 +370,7 @@ int main(int argc, char** argv) {
     Settings::values.use_cpu_jit = std::getenv("SR_INTERP") == nullptr;
     Settings::values.frame_limit = 0;
     Settings::values.audio_emulation = Settings::AudioEmulation::HLE;
+    Settings::values.async_fs_operations = std::getenv("SR_ASYNCFS") != nullptr;
     Input::RegisterFactory<Input::ButtonDevice>("sr", std::make_shared<ScriptButtonFactory>());
     Input::RegisterFactory<Input::TouchDevice>("sr", std::make_shared<ScriptTouchFactory>());
     for (int i = 0; i < Settings::NativeButton::NumButtons; ++i) {
@@ -414,6 +446,42 @@ int main(int argc, char** argv) {
                 }
                 std::printf("hudbench %llu frames: avg %.2f ms, worst %.2f ms, %d rasters\n",
                             static_cast<unsigned long long>(n), total / n, worst, rasters);
+            } else if (cmd == "fx") {
+                // fx learn|capture|off : drive the effect layer without a HUD
+                std::string m;
+                in >> m;
+                std::vector<ScreenRegions::FxLayer::Blit> b;
+                if (m == "capture")
+                    b.push_back({0, 0, 320, 240, 0, 0, 320, 240, 1.0f});
+                ScreenRegions::FxLayer::Instance().SetState(m == "learn", std::move(b));
+            } else if (cmd == "fxsave" || cmd == "fxload") {
+                std::string path;
+                in >> path;
+                if (cmd == "fxsave") {
+                    ScreenRegions::FxLayer::Instance().LearnTexture(0); // force a write
+                    ScreenRegions::FxLayer::Instance().SaveTexturesIfChanged(path);
+                } else {
+                    ScreenRegions::FxLayer::Instance().LoadTextures(path);
+                }
+            } else if (cmd == "fxdump") {
+                // fxdump <path> : the last published effect layer as raw RGBA 320x240
+                std::string path;
+                in >> path;
+                u64 ver = 0;
+                const auto fr = ScreenRegions::FxLayer::Instance().Frame(ver);
+                std::vector<u8> data = fr ? *fr : std::vector<u8>(320 * 240 * 4, 0);
+                FileUtil::IOFile f(path, "wb");
+                f.WriteBytes(data.data(), data.size());
+                std::printf("fx version %llu %s\n", static_cast<unsigned long long>(ver),
+                            fr ? "frame" : "empty");
+            } else if (cmd == "regs") {
+                for (u32 c = 0; c < system.GetNumCores(); ++c) {
+                    auto& core = system.GetCore(c);
+                    std::printf("core%u", c);
+                    for (int r = 0; r < 16; ++r)
+                        std::printf(" r%d=%08x", r, core.GetReg(r));
+                    std::printf("\n");
+                }
             } else if (cmd == "threads") {
                 for (u32 c = 0; c < 4; ++c) {
                     for (const auto& t : system.Kernel().GetThreadManager(c).GetThreadList()) {
@@ -497,6 +565,10 @@ int main(int argc, char** argv) {
                     m.Write16(addr, static_cast<u16>(val));
                 else
                     m.Write32(addr, val);
+                if (addr < 0x08000000) {
+                    for (u32 c = 0; c < system.GetNumCores(); ++c)
+                        system.GetCore(c).InvalidateCacheRange(addr & ~3u, 4);
+                }
             } else if (cmd == "watch") {
                 // watch <addr> <size>: log PC/LR of every read/write in [addr, addr+size)
                 std::string a, n;

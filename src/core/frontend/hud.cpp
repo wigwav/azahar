@@ -183,6 +183,95 @@ void DrawTrace::Line(const std::string& line) {
     }
 }
 
+FxLayer& FxLayer::Instance() {
+    static FxLayer instance;
+    return instance;
+}
+
+void FxLayer::SetState(bool learn, std::vector<Blit> new_blits) {
+    std::scoped_lock lock{mutex};
+    learning.store(learn, std::memory_order_relaxed);
+    capturing.store(!learn && !new_blits.empty(), std::memory_order_relaxed);
+    blits = std::move(new_blits);
+}
+
+void FxLayer::LearnTexture(u64 key) {
+    std::scoped_lock lock{mutex};
+    const auto it = std::lower_bound(ui_textures.begin(), ui_textures.end(), key);
+    if (it == ui_textures.end() || *it != key) {
+        ui_textures.insert(it, key);
+        textures_dirty = true;
+    }
+}
+
+void FxLayer::LoadTextures(const std::string& path) {
+    std::string text;
+    FileUtil::ReadFileToString(true, path, text);
+    std::istringstream in(text);
+    std::vector<u64> keys;
+    std::string tok;
+    while (in >> tok) {
+        keys.push_back(std::strtoull(tok.c_str(), nullptr, 16));
+    }
+    std::scoped_lock lock{mutex};
+    for (const u64 k : keys) {
+        const auto it = std::lower_bound(ui_textures.begin(), ui_textures.end(), k);
+        if (it == ui_textures.end() || *it != k) {
+            ui_textures.insert(it, k);
+        }
+    }
+}
+
+void FxLayer::SaveTexturesIfChanged(const std::string& path) {
+    std::string text;
+    {
+        std::scoped_lock lock{mutex};
+        if (!textures_dirty) {
+            return;
+        }
+        textures_dirty = false;
+        for (const u64 k : ui_textures) {
+            text += fmt::format("{:016x}\n", k);
+        }
+    }
+    FileUtil::CreateFullPath(path);
+    FileUtil::WriteStringToFile(true, path, text);
+}
+
+bool FxLayer::IsUiTexture(u64 key) const {
+    std::scoped_lock lock{mutex};
+    return std::binary_search(ui_textures.begin(), ui_textures.end(), key);
+}
+
+void FxLayer::Publish(std::vector<u8> rgba, bool any) {
+    std::scoped_lock lock{mutex};
+    if (!any && !frame) {
+        return; // nothing drawn now or before: keep the version (no re-upload)
+    }
+    frame = any ? std::make_shared<const std::vector<u8>>(std::move(rgba)) : nullptr;
+    ++version;
+}
+
+std::shared_ptr<const std::vector<u8>> FxLayer::Frame(u64& out_version) const {
+    std::scoped_lock lock{mutex};
+    out_version = version;
+    return frame;
+}
+
+std::vector<FxLayer::Blit> FxLayer::Blits() const {
+    std::scoped_lock lock{mutex};
+    return blits;
+}
+
+void FxLayer::Clear() {
+    std::scoped_lock lock{mutex};
+    learning.store(false);
+    capturing.store(false);
+    blits.clear();
+    frame = nullptr;
+    ++version;
+}
+
 Captures& Captures::Instance() {
     static Captures instance;
     return instance;
@@ -395,6 +484,20 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             const std::string q = t.at(i++);
             e.image = q[0] == '"' ? q.substr(1) : q;
             e.x = num(); e.y = num(); e.w = num(); e.h = num();
+        } else if (kind == "fx") {
+            // fx SX SY SW SH  X Y W H : bottom-screen effects in that rect, drawn at X Y W H
+            e.type = Element::Type::Fx;
+            for (float& v : e.src) {
+                v = num();
+            }
+            e.x = num();
+            e.y = num();
+            e.w = num();
+            e.h = num();
+        } else if (kind == "fxlearn") {
+            // fxlearn if=... : while true, the bottom screen shows only menus (learn their
+            // textures)
+            e.type = Element::Type::FxLearn;
         } else if (kind == "bar") {
             e.type = Element::Type::Bar;
             e.x = num(); e.y = num(); e.w = num(); e.h = num();
@@ -527,6 +630,7 @@ void Hud::SetDefinition(const std::vector<HudDef>& new_defs, const std::string& 
     defs = new_defs;
     defs_shared = std::make_shared<const std::vector<HudDef>>(new_defs);
     asset_dir = dir;
+    FxLayer::Instance().LoadTextures(asset_dir + "cache/fx_menu_textures.txt");
     lookups.clear();
     last_profile.clear();
     last_values.clear();
@@ -610,6 +714,7 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         }
     }
     if (!def) {
+        FxLayer::Instance().SetState(false, {});
         if (!last_profile.empty()) {
             last_profile.clear();
             {
@@ -637,6 +742,8 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
     std::vector<bool> visible(def->elements.size());
     offsets.assign(def->elements.size(), {0.0f, 0.0f});
     fades.assign(def->elements.size(), 1.0f);
+    bool fx_learn = false;
+    std::vector<FxLayer::Blit> fx_blits;
     for (size_t i = 0; i < def->elements.size(); ++i) {
         const auto& e = def->elements[i];
         const bool can_hold = active_profile == last_profile && i < last_visible.size();
@@ -668,6 +775,17 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
         for (const auto& b : e.values) {
             values[i].push_back(b.Eval(ctx));
         }
+        if (e.type == Element::Type::Fx || e.type == Element::Type::FxLearn) {
+            if (e.type == Element::Type::FxLearn) {
+                fx_learn = true;
+            } else {
+                fx_blits.push_back({e.src[0], e.src[1], e.src[2], e.src[3], e.x + offsets[i].first,
+                                    e.y + offsets[i].second, e.w, e.h, e.opacity * fades[i]});
+            }
+            visible[i] = false; // drawn by the renderer every frame, not on the canvas
+            values[i].clear();
+            continue;
+        }
         if (e.type == Element::Type::Capture) {
             Captures::Instance().Ask(Format(e.image, values[i]), e.x, e.y, e.w, e.h);
             values[i].clear(); // requests don't change the canvas by themselves
@@ -677,6 +795,11 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
             PersistCapture(name);
         }
     }
+    if (fx_was_learning && !fx_learn) {
+        FxLayer::Instance().SaveTexturesIfChanged(asset_dir + "cache/fx_menu_textures.txt");
+    }
+    fx_was_learning = fx_learn;
+    FxLayer::Instance().SetState(fx_learn, std::move(fx_blits));
     if (active_profile == last_profile && values == last_values && visible == last_visible &&
         offsets == last_offsets && fades == last_fades) {
         return false;

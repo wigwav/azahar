@@ -10,7 +10,6 @@
 #include "common/microprofile.h"
 #include "core/loader/loader.h"
 #include "video_core/pica/pica_core.h"
-#include "core/frontend/hud.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
 #include "video_core/renderer_opengl/pica_to_gl.h"
 #include "video_core/renderer_opengl/renderer_opengl.h"
@@ -553,33 +552,7 @@ void RasterizerOpenGL::DrawTriangles() {
 
 bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
     MICROPROFILE_SCOPE(OpenGL_Drawing);
-    if (ScreenRegions::DrawTrace::Instance().Active()) {
-        const auto tex = regs.texturing.GetTextures();
-        const auto& ab = regs.framebuffer.output_merger.alpha_blending;
-        const auto vp = regs.rasterizer.GetViewportRect();
-        std::string line = fmt::format(
-            "D c={:08x} fb={}x{} vp={},{},{},{} n={} ab={} eq={} s={} d={} sa={} da={}",
-            regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
-            static_cast<u32>(regs.framebuffer.framebuffer.width.Value()),
-            static_cast<u32>(regs.framebuffer.framebuffer.height.Value()), vp.left, vp.bottom,
-            vp.right, vp.top,
-            accelerate ? static_cast<u32>(regs.pipeline.num_vertices)
-                       : static_cast<u32>(vertex_batch.size()),
-            static_cast<u32>(regs.framebuffer.output_merger.alphablend_enable.Value()),
-            static_cast<u32>(ab.blend_equation_rgb.Value()),
-            static_cast<u32>(ab.factor_source_rgb.Value()),
-            static_cast<u32>(ab.factor_dest_rgb.Value()),
-            static_cast<u32>(ab.factor_source_a.Value()),
-            static_cast<u32>(ab.factor_dest_a.Value()));
-        for (u32 t = 0; t < tex.size(); ++t) {
-            if (tex[t].enabled) {
-                line += fmt::format(" t{}={:08x}:{}x{}:{}", t, tex[t].config.GetPhysicalAddress(),
-                                    tex[t].config.width.Value(), tex[t].config.height.Value(),
-                                    static_cast<u32>(tex[t].format));
-            }
-        }
-        ScreenRegions::DrawTrace::Instance().Line(line);
-    }
+
     const DebugScope scope(runtime, Common::Vec4f{}, "RasterizerOpenGL::Draw");
 
     SyncDrawState();

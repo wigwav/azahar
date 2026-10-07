@@ -12,15 +12,16 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
-#include <cstdio>
 #include <condition_variable>
-#include <thread>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 #include "common/common_types.h"
 #include "core/frontend/hud_expr.h"
@@ -77,6 +78,56 @@ private:
     u64 counter = 0;
 };
 
+/// Bottom-screen effects for the single-screen HUD. While the HUD says "learn" (the player is
+/// choosing commands, so the bottom screen shows only menus), the GPU core remembers every texture
+/// drawn on the bottom screen. While the HUD shows an "fx" element, every bottom-screen triangle
+/// drawn with a texture outside that set (hit sparks, slashes, elemental bursts, buff sparkles...)
+/// is also rasterised on the CPU into a transparent 320x240 layer, published once per bottom
+/// frame. The renderer then draws parts of that layer onto the HUD (e.g. over a member's card),
+/// so animations play exactly as the game draws them, minus the menus under them.
+class FxLayer {
+public:
+    struct Blit {
+        float sx, sy, sw, sh; ///< source rect in bottom-screen pixels (320x240)
+        float dx, dy, dw, dh; ///< destination rect in HUD canvas pixels
+        float opacity;
+    };
+    static FxLayer& Instance();
+
+    // HUD side (every update)
+    void SetState(bool learn, std::vector<Blit> blits);
+
+    // GPU side
+    bool Learning() const {
+        return learning.load(std::memory_order_relaxed);
+    }
+    bool Capturing() const {
+        return capturing.load(std::memory_order_relaxed);
+    }
+    void LearnTexture(u64 key);
+    bool IsUiTexture(u64 key) const;
+    /// Menu textures persist between sessions (a state loaded mid-action has no menus to learn).
+    void LoadTextures(const std::string& path);
+    void SaveTexturesIfChanged(const std::string& path);
+    /// Bottom frame finished: publish the layer (premultiplied RGBA8, 320x240, row 0 = top).
+    void Publish(std::vector<u8> rgba, bool any);
+
+    // Renderer side
+    std::shared_ptr<const std::vector<u8>> Frame(u64& version) const;
+    std::vector<Blit> Blits() const;
+    void Clear();
+
+private:
+    std::atomic<bool> learning{false};
+    std::atomic<bool> capturing{false};
+    mutable std::mutex mutex;
+    std::vector<Blit> blits;
+    std::vector<u64> ui_textures; ///< sorted
+    bool textures_dirty = false;
+    std::shared_ptr<const std::vector<u8>> frame;
+    u64 version = 0;
+};
+
 /// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on starts with "on", one line
 /// per GPU draw (render target, textures, blending, vertex count) and per displayed frame goes to
 /// <log>/drawtrace.txt (capped).
@@ -115,7 +166,7 @@ struct Binding {
 };
 
 struct Element {
-    enum class Type { Rect, Image, Text, Bar, Capture } type = Type::Rect;
+    enum class Type { Rect, Image, Text, Bar, Capture, Fx, FxLearn } type = Type::Rect;
     float x = 0, y = 0, w = 0, h = 0;
     u32 color = 0xFFFFFFFF;     ///< RRGGBBAA
     u32 color2 = 0x000000A0;    ///< bar background
@@ -134,6 +185,7 @@ struct Element {
     float fit = 0;              ///< Text: shrink to fit this width (0 = off)
     Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
     Binding fade;               ///< opacity 0..100 from an expression ("fade==EXPR")
+    float src[4] = {0, 0, 0, 0}; ///< Fx: bottom-screen source rect (320x240 pixels)
     bool has_fade = false;
     bool has_offset = false;
 };
@@ -229,6 +281,7 @@ private:
     std::vector<std::vector<Value>> last_values;
     std::vector<std::pair<float, float>> offsets;
     std::vector<std::pair<float, float>> last_offsets;
+    bool fx_was_learning = false;
     std::vector<float> fades;
     std::vector<float> last_fades;
     std::vector<bool> last_visible;

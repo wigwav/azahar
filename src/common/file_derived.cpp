@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the misc/licenses/gplv2.txt file included.
 
+#include <cstdlib>
 #include <cryptopp/aes.h>
 #include <cryptopp/modes.h>
 #include <cryptopp/sha.h>
@@ -83,12 +84,30 @@ bool SubIOFile::IsReplaceOpenMode(const char* openmode) {
     return has_read && !truncate && !append;
 }
 
+namespace {
+// Headless tooling: a save state from another dump of the same game may place the fragment at a
+// different offset in the substituted game file (SR_ROMFS_SUB=from:to, hex).
+std::size_t RemapSubOffset(std::size_t off) {
+    static const std::pair<std::size_t, std::size_t> remap = [] {
+        const char* env = std::getenv("SR_ROMFS_SUB");
+        if (!env)
+            return std::pair<std::size_t, std::size_t>{~std::size_t{0}, 0};
+        char* end = nullptr;
+        const std::size_t from = std::strtoull(env, &end, 16);
+        const std::size_t to = (end && *end == ':') ? std::strtoull(end + 1, nullptr, 16) : from;
+        return std::pair<std::size_t, std::size_t>{from, to};
+    }();
+    return off == remap.first ? remap.second : off;
+}
+} // namespace
+
 bool SubIOFile::Open() {
     if (!Child()->IsOpen()) {
         m_good = false;
         return false;
     }
-    if (Child()->GetSize() < m_sub_file_offset + m_sub_file_capacity) {
+    if (Child()->GetSize() < m_sub_file_offset + m_sub_file_capacity &&
+        !std::getenv("SR_ROMFS_SUB")) {
         // Child file isn't large enough to contain the requested fragment.
         m_good = false;
         return false;
@@ -210,7 +229,7 @@ std::size_t SubIOFile::ReadAtImpl(void* data, std::size_t byte_count, std::size_
     if (bytes_to_read == 0) {
         return 0;
     }
-    const std::size_t absolute_offset = m_sub_file_offset + offset;
+    const std::size_t absolute_offset = RemapSubOffset(m_sub_file_offset) + offset;
     return Child()->ReadAtArray(reinterpret_cast<char*>(data), bytes_to_read, absolute_offset);
 }
 

@@ -91,13 +91,7 @@ RendererOpenGL::RendererOpenGL(Core::System& system, Pica::PicaCore& pica_,
 RendererOpenGL::~RendererOpenGL() = default;
 
 void RendererOpenGL::SwapBuffers() {
-    {
-        auto fb_addr = [&](u32 id) {
-            const auto& fb = pica.regs.framebuffer_config[id];
-            return static_cast<u32>(fb.active_fb == 0 ? fb.address_left1 : fb.address_left2);
-        };
-        ScreenRegions::DrawTrace::Instance().Frame(fb_addr(0), fb_addr(1));
-    }
+
     system.perf_stats->StartSwap();
     ScreenRegions::Manager::Instance().Update(system);
     // Maintain the rasterizer's state as a priority
@@ -760,6 +754,7 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
         DrawScreenRegions(layout);
         DrawHud(layout);
     }
+    DrawFx(layout);
     ResetSecondLayerOpacity();
 }
 
@@ -934,6 +929,77 @@ void RendererOpenGL::DrawHud(const Layout::FramebufferLayout& layout) {
     state.Apply();
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    state.texture_units[0].texture_2d = 0;
+    state.texture_units[0].sampler = 0;
+    state.Apply();
+}
+
+/**
+ * Draws the bottom screen's effects (ScreenRegions::FxLayer, premultiplied alpha) where the HUD
+ * placed them, e.g. a hit spark over the card of the party member being hit.
+ */
+void RendererOpenGL::DrawFx(const Layout::FramebufferLayout& layout) {
+    auto& layer = ScreenRegions::FxLayer::Instance();
+    const auto blits = layer.Blits();
+    if (blits.empty()) {
+        return;
+    }
+    u64 version = 0;
+    const auto frame = layer.Frame(version);
+    if (!frame) {
+        return;
+    }
+    auto& regions = ScreenRegions::Manager::Instance();
+    u64 hud_ver = 0;
+    const auto canvas = regions.HudCanvas(hud_ver);
+    if (!canvas || canvas->width == 0 || canvas->height == 0) {
+        return;
+    }
+    if (fx_texture.handle == 0) {
+        fx_texture.Create();
+        fx_version = ~0ULL;
+    }
+    state.texture_units[0].texture_2d = fx_texture.handle;
+    state.texture_units[0].sampler = samplers[1].handle;
+    state.Apply();
+    if (version != fx_version) {
+        glActiveTexture(GL_TEXTURE0);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 320, 240, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     frame->data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        fx_version = version;
+    }
+    const auto r = regions.CanvasRect(layout);
+    const float kx = (r.right - r.left) / static_cast<float>(canvas->width);
+    const float ky = (r.bottom - r.top) / static_cast<float>(canvas->height);
+    glUniform1i(uniform_layer, 0);
+    glUniform4f(uniform_i_resolution, 320.0f, 240.0f, 1.0f / 320.0f, 1.0f / 240.0f);
+    for (const auto& b : blits) {
+        if (b.dw <= 0.0f || b.dh <= 0.0f || b.opacity <= 0.0f) {
+            continue;
+        }
+        const float x0 = r.left + b.dx * kx, y0 = r.top + b.dy * ky;
+        const float x1 = x0 + b.dw * kx, y1 = y0 + b.dh * ky;
+        const float u0 = b.sx / 320.0f, u1 = (b.sx + b.sw) / 320.0f;
+        const float v0 = b.sy / 240.0f, v1 = (b.sy + b.sh) / 240.0f;
+        const std::array<ScreenRectVertex, 4> vertices = {{
+            ScreenRectVertex(x0, y0, u0, v0),
+            ScreenRectVertex(x1, y0, u1, v0),
+            ScreenRectVertex(x0, y1, u0, v1),
+            ScreenRectVertex(x1, y1, u1, v1),
+        }};
+        // premultiplied: colour scaled by the blit's opacity, the background by the coverage
+        state.blend.src_rgb_func = GL_CONSTANT_ALPHA;
+        state.blend.dst_rgb_func = GL_ONE_MINUS_SRC_ALPHA;
+        state.blend.src_a_func = GL_CONSTANT_ALPHA;
+        state.blend.dst_a_func = GL_ONE_MINUS_SRC_ALPHA;
+        state.blend.color.alpha = std::min(1.0f, b.opacity);
+        glUniform4f(uniform_o_resolution, x1 - x0, y1 - y0, 1.0f / (x1 - x0), 1.0f / (y1 - y0));
+        state.Apply();
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
     state.texture_units[0].texture_2d = 0;
     state.texture_units[0].sampler = 0;
     state.Apply();

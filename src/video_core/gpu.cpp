@@ -462,6 +462,11 @@ void GPU::MemoryTransfer() {
             config.output_height.Value(), static_cast<u32>(config.is_texture_copy.Value()),
             config.flags));
     }
+    if (!config.is_texture_copy.Value() && config.input_width.Value() == 240 &&
+        config.input_height.Value() == 320 && config.output_width.Value() == 240 &&
+        config.output_height.Value() == 320) {
+        impl->pica.EndBottomFrame(); // the bottom screen's frame is complete
+    }
 
     // Notify debugger about the display transfer.
     if (impl->debug_context) {
@@ -500,6 +505,13 @@ void GPU::VBlankCallback(std::uintptr_t user_data, s64 cycles_late) {
     impl->signal_interrupt(Service::GSP::InterruptId::PDC1, 0);
 
     // Present renderered frame.
+    {
+        auto fb_addr = [&](u32 id) {
+            const auto& fb = impl->pica.regs.framebuffer_config[id];
+            return static_cast<u32>(fb.active_fb == 0 ? fb.address_left1 : fb.address_left2);
+        };
+        ScreenRegions::DrawTrace::Instance().Frame(fb_addr(0), fb_addr(1));
+    }
     impl->renderer->SwapBuffers();
 
     // Reschedule recurrent event
