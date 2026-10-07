@@ -223,9 +223,9 @@ void System::LoadState(u32 slot) {
         // validate header
         SaveStateInfo info;
         info.slot = slot;
-        if (!ValidateSaveState(header, info, title_id, movie_id) ||
-            (info.status == SaveStateInfo::ValidationStatus::BuildMismatch &&
-             !std::getenv("CITRA_ALLOW_STATE_BUILD_MISMATCH"))) {
+        // A different build of this fork made it: the emulated state is the same (only the
+        // frontend/HUD differ between builds), so states from earlier builds keep loading.
+        if (!ValidateSaveState(header, info, title_id, movie_id)) {
             throw std::runtime_error("Invalid savestate");
         }
 

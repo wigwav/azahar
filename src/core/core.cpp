@@ -168,8 +168,8 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
             return ResultStatus::ErrorSavestate;
         }
         if (info.status == Core::SaveStateInfo::ValidationStatus::BuildMismatch) {
-            status_details = info.build_name;
-            return ResultStatus::ErrorSavestateBuildMismatch;
+            // Another build of this fork: the emulated state is unchanged between builds.
+            LOG_WARNING(Core, "Loading savestate made by build {}", info.build_name);
         }
         save_state_slot = param;
         save_state_request_time = std::chrono::steady_clock::now();
