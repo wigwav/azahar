@@ -3,8 +3,8 @@
 // Refer to the license.txt file included.
 
 #include <algorithm>
-#include <map>
 #include <cmath>
+#include <map>
 #include <sstream>
 #include <fmt/format.h>
 #include "common/file_util.h"
@@ -149,9 +149,8 @@ void DrawTrace::Frame(u32 top_addr, u32 bottom_addr) {
         const bool want = flag.rfind("on", 0) == 0;
         if (want && !file) {
             lines = 0; // each switch-on starts a fresh budget
-            file = std::fopen((FileUtil::GetUserPath(FileUtil::UserPath::LogDir) + "drawtrace.txt")
-                                  .c_str(),
-                              "a");
+            file = std::fopen(
+                (FileUtil::GetUserPath(FileUtil::UserPath::LogDir) + "drawtrace.txt").c_str(), "a");
         } else if (!want && file) {
             std::fclose(file);
             file = nullptr;
@@ -362,10 +361,9 @@ s64 Binding::Read(Core::System& system) const {
     if (is_expr) {
         static const std::map<std::string, Value> no_vars;
         static const std::vector<std::string> no_lines;
-        Expr::Context ctx{system, no_vars,
-                          [](const std::string&) -> const std::vector<std::string>& {
-                              return no_lines;
-                          }};
+        Expr::Context ctx{
+            system, no_vars,
+            [](const std::string&) -> const std::vector<std::string>& { return no_lines; }};
         v = node.Eval(ctx).n;
     } else if (probe) {
         const u32 rgb = Probes::Instance().Get(probe_x, probe_y);
@@ -442,9 +440,9 @@ bool Hud::ParseLet(const std::string& line, HudDef& def, std::string& error) {
         return false;
     }
     std::string name = line.substr(4, eq - 4);
-    name.erase(std::remove_if(name.begin(), name.end(),
-                              [](unsigned char c) { return std::isspace(c); }),
-               name.end());
+    name.erase(
+        std::remove_if(name.begin(), name.end(), [](unsigned char c) { return std::isspace(c); }),
+        name.end());
     Expr expr;
     if (!expr.Parse(line.substr(eq + 1), error)) {
         return false;
@@ -465,15 +463,23 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
         auto num = [&]() { return std::stof(t.at(i++)); };
         if (kind == "rect") {
             e.type = Element::Type::Rect;
-            e.x = num(); e.y = num(); e.w = num(); e.h = num();
+            e.x = num();
+            e.y = num();
+            e.w = num();
+            e.h = num();
             e.color = ParseColor(t.at(i++));
         } else if (kind == "image") {
             e.type = Element::Type::Image;
-            e.x = num(); e.y = num(); e.w = num(); e.h = num();
+            e.x = num();
+            e.y = num();
+            e.w = num();
+            e.h = num();
             e.image = t.at(i++);
         } else if (kind == "text") {
             e.type = Element::Type::Text;
-            e.x = num(); e.y = num(); e.size = num();
+            e.x = num();
+            e.y = num();
+            e.size = num();
             e.color = ParseColor(t.at(i++));
             const std::string a = t.at(i++);
             e.align = a == "center" ? 1 : a == "right" ? 2 : 0;
@@ -483,7 +489,10 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             e.type = Element::Type::Capture;
             const std::string q = t.at(i++);
             e.image = q[0] == '"' ? q.substr(1) : q;
-            e.x = num(); e.y = num(); e.w = num(); e.h = num();
+            e.x = num();
+            e.y = num();
+            e.w = num();
+            e.h = num();
         } else if (kind == "fx") {
             // fx SX SY SW SH  X Y W H : bottom-screen effects in that rect, drawn at X Y W H
             e.type = Element::Type::Fx;
@@ -500,7 +509,10 @@ bool Hud::ParseElement(const std::string& line, Element& e, std::string& error) 
             e.type = Element::Type::FxLearn;
         } else if (kind == "bar") {
             e.type = Element::Type::Bar;
-            e.x = num(); e.y = num(); e.w = num(); e.h = num();
+            e.x = num();
+            e.y = num();
+            e.w = num();
+            e.h = num();
             e.color = ParseColor(t.at(i++));
             e.color2 = ParseColor(t.at(i++));
         } else {
@@ -767,7 +779,8 @@ bool Hud::Update(Core::System& system, const std::string& active_profile) {
             continue;
         }
         if (e.has_offset) {
-            offsets[i] = {static_cast<float>(e.ox.Eval(ctx).n), static_cast<float>(e.oy.Eval(ctx).n)};
+            offsets[i] = {static_cast<float>(e.ox.Eval(ctx).n),
+                          static_cast<float>(e.oy.Eval(ctx).n)};
         }
         if (e.has_fade) {
             fades[i] = std::clamp(static_cast<float>(e.fade.Eval(ctx).n) / 100.0f, 0.0f, 1.0f);
@@ -989,8 +1002,8 @@ void Hud::DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, flo
     }
 }
 
-void Hud::DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
-                    float opacity, const float* crop) {
+void Hud::DrawImage(Image& dst, const Image& src, float x, float y, float w, float h, float opacity,
+                    const float* crop) {
     static constexpr float full[4] = {0, 0, 1, 1};
     const float* cr = crop ? crop : full;
     const int x0 = std::max(0, static_cast<int>(x));
@@ -1068,7 +1081,9 @@ void Hud::DrawText(Image& dst, const std::string& text, float x, float y, float 
                 const int sx = std::clamp(static_cast<int>(u), 0, (int)font_atlas.width - 2);
                 const float fx = std::clamp(u - sx, 0.0f, 1.0f);
                 auto al = [&](int px, int py) {
-                    return font_atlas.pixels[(static_cast<size_t>(py) * font_atlas.width + px) * 4 + 3] / 255.0f;
+                    return font_atlas
+                               .pixels[(static_cast<size_t>(py) * font_atlas.width + px) * 4 + 3] /
+                           255.0f;
                 };
                 const float cov = (al(sx, sy) * (1 - fx) + al(sx + 1, sy) * fx) * (1 - fy) +
                                   (al(sx, sy + 1) * (1 - fx) + al(sx + 1, sy + 1) * fx) * fy;

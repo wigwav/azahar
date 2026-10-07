@@ -128,13 +128,15 @@ private:
     u64 version = 0;
 };
 
-/// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on starts with "on", one line
-/// per GPU draw (render target, textures, blending, vertex count) and per displayed frame goes to
-/// <log>/drawtrace.txt (capped).
+/// Draw tracing for reverse engineering: while <load>/screen_regions/trace.on starts with "on", one
+/// line per GPU draw (render target, textures, blending, vertex count) and per displayed frame goes
+/// to <log>/drawtrace.txt (capped).
 class DrawTrace {
 public:
     static DrawTrace& Instance();
-    bool Active() const { return active; }
+    bool Active() const {
+        return active;
+    }
     void Frame(u32 top_addr, u32 bottom_addr);
     void Line(const std::string& line);
 
@@ -153,13 +155,13 @@ struct Binding {
     bool constant = true;
     s64 value = 0;
     bool probe = false;
-    int probe_mode = 0;           ///< 0: luminance ("pix:"), 1: green excess ("pixg:")
+    int probe_mode = 0; ///< 0: luminance ("pix:"), 1: green excess ("pixg:")
     u32 probe_x = 0, probe_y = 0;
-    char cmp = 0;                 ///< '<', '>', '=', '!' (not equal), '&' (any bit) or 0
+    char cmp = 0; ///< '<', '>', '=', '!' (not equal), '&' (any bit) or 0
     s64 cmp_value = 0;
-    std::string expr;             ///< address expression, e.g. "[0x00500000]+0x20"
-    u32 size = 2;                 ///< 1, 2 or 4 bytes for the final read
-    bool is_expr = false;         ///< "=EXPR": full expression (see hud_expr.h)
+    std::string expr;     ///< address expression, e.g. "[0x00500000]+0x20"
+    u32 size = 2;         ///< 1, 2 or 4 bytes for the final read
+    bool is_expr = false; ///< "=EXPR": full expression (see hud_expr.h)
     Expr node;
     s64 Read(Core::System& system) const;
     Value Eval(const Expr::Context& ctx) const;
@@ -168,30 +170,30 @@ struct Binding {
 struct Element {
     enum class Type { Rect, Image, Text, Bar, Capture, Fx, FxLearn } type = Type::Rect;
     float x = 0, y = 0, w = 0, h = 0;
-    u32 color = 0xFFFFFFFF;     ///< RRGGBBAA
-    u32 color2 = 0x000000A0;    ///< bar background
+    u32 color = 0xFFFFFFFF;  ///< RRGGBBAA
+    u32 color2 = 0x000000A0; ///< bar background
     float opacity = 1.0f;
     float crop[4] = {0, 0, 1, 1}; ///< Image: source rect as fractions ("crop=x,y,w,h")
-    std::string image;          ///< image file (Image)
-    std::string text;           ///< text template; {0},{1}.. are replaced by values (Text)
-    float size = 32.0f;         ///< text pixel height
-    int align = 0;              ///< -1 left, 0 left, 1 centre, 2 right
-    std::vector<Binding> values;///< Text: template values; Bar: [value, max]
-    Binding visible;            ///< element shown when non-zero (constant 1 by default)
-    Binding visible2;           ///< optional second condition ("and=")
-    Binding hold;               ///< while non-zero, keep the previous visibility ("hold=")
-    int linger = 0;             ///< ms an element stays up after its condition drops ("linger=")
-    std::string lookup;         ///< Text: list file; {0} shows line[value] instead of value
-    float fit = 0;              ///< Text: shrink to fit this width (0 = off)
-    Binding ox, oy;             ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
-    Binding fade;               ///< opacity 0..100 from an expression ("fade==EXPR")
-    float src[4] = {0, 0, 0, 0}; ///< Fx: bottom-screen source rect (320x240 pixels)
+    std::string image;            ///< image file (Image)
+    std::string text;             ///< text template; {0},{1}.. are replaced by values (Text)
+    float size = 32.0f;           ///< text pixel height
+    int align = 0;                ///< -1 left, 0 left, 1 centre, 2 right
+    std::vector<Binding> values;  ///< Text: template values; Bar: [value, max]
+    Binding visible;              ///< element shown when non-zero (constant 1 by default)
+    Binding visible2;             ///< optional second condition ("and=")
+    Binding hold;                 ///< while non-zero, keep the previous visibility ("hold=")
+    int linger = 0;               ///< ms an element stays up after its condition drops ("linger=")
+    std::string lookup;           ///< Text: list file; {0} shows line[value] instead of value
+    float fit = 0;                ///< Text: shrink to fit this width (0 = off)
+    Binding ox, oy;               ///< position offsets from expressions ("ox==EXPR", "oy==EXPR")
+    Binding fade;                 ///< opacity 0..100 from an expression ("fade==EXPR")
+    float src[4] = {0, 0, 0, 0};  ///< Fx: bottom-screen source rect (320x240 pixels)
     bool has_fade = false;
     bool has_offset = false;
 };
 
 struct HudDef {
-    std::string name;           ///< profile this HUD belongs to
+    std::string name; ///< profile this HUD belongs to
     std::vector<Element> elements;
     std::vector<std::pair<std::string, Expr>> lets; ///< "let name = EXPR", evaluated in order
 };
@@ -261,8 +263,8 @@ private:
     std::string worker_asset_dir;
     std::shared_ptr<const std::vector<HudDef>> defs_shared;
     void DrawRect(Image& dst, float x, float y, float w, float h, u32 rgba, float opacity);
-    void DrawImage(Image& dst, const Image& src, float x, float y, float w, float h,
-                   float opacity, const float* crop = nullptr);
+    void DrawImage(Image& dst, const Image& src, float x, float y, float w, float h, float opacity,
+                   const float* crop = nullptr);
     void DrawText(Image& dst, const std::string& text, float x, float y, float size, int align,
                   u32 rgba, float opacity);
     float TextWidth(const std::string& text, float size);

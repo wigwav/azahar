@@ -4,13 +4,13 @@
 
 #include <algorithm>
 #include <cctype>
-#include <sstream>
-#include <fmt/format.h>
 #include <chrono>
+#include <sstream>
 #include <thread>
+#include <fmt/format.h>
 #include "common/file_util.h"
-#include "common/zstd_compression.h"
 #include "common/logging/log.h"
+#include "common/zstd_compression.h"
 #include "core/core.h"
 #include "core/frontend/framebuffer_layout.h"
 #include "core/frontend/screen_regions.h"
@@ -262,13 +262,20 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
                     rule.addr = ParseNumber(first);
                     const std::string lsize = Lower(size);
                     rule.size = lsize == "u32" ? 4 : lsize == "u16" ? 2 : 1;
-                    if (op == "==") rule.op = RuleOp::Eq;
-                    else if (op == "!=") rule.op = RuleOp::Ne;
-                    else if (op == "&") rule.op = RuleOp::And;
-                    else if (op == "!&") rule.op = RuleOp::NotAnd;
-                    else if (op == ">") rule.op = RuleOp::Gt;
-                    else if (op == "<") rule.op = RuleOp::Lt;
-                    else throw std::invalid_argument("bad operator");
+                    if (op == "==")
+                        rule.op = RuleOp::Eq;
+                    else if (op == "!=")
+                        rule.op = RuleOp::Ne;
+                    else if (op == "&")
+                        rule.op = RuleOp::And;
+                    else if (op == "!&")
+                        rule.op = RuleOp::NotAnd;
+                    else if (op == ">")
+                        rule.op = RuleOp::Gt;
+                    else if (op == "<")
+                        rule.op = RuleOp::Lt;
+                    else
+                        throw std::invalid_argument("bad operator");
                     rule.value = ParseNumber(val);
                 }
                 rule.profile = Trim(value.substr(arrow + 2));
@@ -282,9 +289,9 @@ bool Manager::LoadFile(const std::string& path, const std::string& contents) {
     if (default_profile.empty() && !profiles.empty()) {
         default_profile = profiles.front().name;
     }
-    hud.SetDefinition(hud_defs, fmt::format("{}screen_regions/{:016X}/",
-                                            FileUtil::GetUserPath(FileUtil::UserPath::LoadDir),
-                                            title_id));
+    hud.SetDefinition(hud_defs,
+                      fmt::format("{}screen_regions/{:016X}/",
+                                  FileUtil::GetUserPath(FileUtil::UserPath::LoadDir), title_id));
     texture_seen.clear();
     for (const auto& rule : rules) {
         for (const u64 hash : rule.textures) {
@@ -309,8 +316,8 @@ void Manager::Update(Core::System& system) {
     ++present_frame;
     const u64 current_title = process->codeset->program_id;
     const bool title_changed = current_title != title_id;
-    const bool check_file = title_changed || reload_requested.exchange(false) ||
-                            (++frame_counter % 60) == 0;
+    const bool check_file =
+        title_changed || reload_requested.exchange(false) || (++frame_counter % 60) == 0;
 
     if (title_changed || process.get() != last_process) {
         last_process = process.get();
@@ -336,8 +343,8 @@ void Manager::Update(Core::System& system) {
                         FileUtil::GetUserPath(FileUtil::UserPath::LoadDir), title_id);
         // Compare file contents rather than timestamps: robust on every platform/filesystem.
         std::string contents;
-        const bool exists = FileUtil::Exists(path) &&
-                            FileUtil::ReadFileToString(true, path, contents) > 0;
+        const bool exists =
+            FileUtil::Exists(path) && FileUtil::ReadFileToString(true, path, contents) > 0;
         if (!exists) {
             if (!file_path.empty() || title_changed) {
                 Clear();
@@ -351,8 +358,7 @@ void Manager::Update(Core::System& system) {
             file_path = path;
             file_contents = std::move(contents);
             overlay_on = keep_overlay;
-            manual_index =
-                keep_manual < static_cast<int>(profiles.size()) ? keep_manual : -1;
+            manual_index = keep_manual < static_cast<int>(profiles.size()) ? keep_manual : -1;
         }
     }
 
@@ -403,12 +409,24 @@ void Manager::Update(Core::System& system) {
         }
         bool match = false;
         switch (rule.op) {
-        case RuleOp::Eq: match = v == rule.value; break;
-        case RuleOp::Ne: match = v != rule.value; break;
-        case RuleOp::And: match = (v & rule.value) != 0; break;
-        case RuleOp::NotAnd: match = (v & rule.value) == 0; break;
-        case RuleOp::Gt: match = v > rule.value; break;
-        case RuleOp::Lt: match = v < rule.value; break;
+        case RuleOp::Eq:
+            match = v == rule.value;
+            break;
+        case RuleOp::Ne:
+            match = v != rule.value;
+            break;
+        case RuleOp::And:
+            match = (v & rule.value) != 0;
+            break;
+        case RuleOp::NotAnd:
+            match = (v & rule.value) == 0;
+            break;
+        case RuleOp::Gt:
+            match = v > rule.value;
+            break;
+        case RuleOp::Lt:
+            match = v < rule.value;
+            break;
         }
         if (match) {
             selected = rule.profile;
@@ -666,12 +684,12 @@ std::vector<DrawRegion> Manager::Resolve(const Layout::FramebufferLayout& layout
             }
             const bool window_space = r.space < 0 ? space_window : r.space == 1;
             const auto dst = ToFramebuffer(adjusted, r.dst, window_space);
-            out.push_back(DrawRegion{
-                Common::Rectangle<float>{r.src.x / BottomWidth, r.src.y / BottomHeight,
-                                         (r.src.x + r.src.w) / BottomWidth,
-                                         (r.src.y + r.src.h) / BottomHeight},
-                dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top, r.opacity, r.touch,
-                r.screen});
+            out.push_back(
+                DrawRegion{Common::Rectangle<float>{r.src.x / BottomWidth, r.src.y / BottomHeight,
+                                                    (r.src.x + r.src.w) / BottomWidth,
+                                                    (r.src.y + r.src.h) / BottomHeight},
+                           dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top, r.opacity,
+                           r.touch, r.screen});
         }
     };
     append(CurrentProfile());

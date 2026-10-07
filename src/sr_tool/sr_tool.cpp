@@ -12,10 +12,11 @@
 //   w8|w16|w32 <addr> <v>  poke guest memory
 //   quit
 
-#include <cstring>
 #include <atomic>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -27,16 +28,15 @@
 #include "common/logging/filter.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
-#include "core/core.h"
-#include "core/hle/kernel/thread.h"
 #include "core/arm/arm_interface.h"
+#include "core/core.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
 #include "core/frontend/hud.h"
 #include "core/frontend/input.h"
-#include <fstream>
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/process.h"
+#include "core/hle/kernel/thread.h"
 #include "core/hle/kernel/vm_manager.h"
 #include "core/hle/service/service.h"
 #include "core/memory.h"
@@ -209,7 +209,6 @@ void Dump(Core::System& system, const std::string& path) {
     std::fflush(stdout);
 }
 
-
 std::string g_rec_bottom; // 320x240 RGB from a loaded recording
 void ServiceCaptures(Core::System& system) {
     auto* sw = dynamic_cast<SwRenderer::RendererSoftware*>(&system.GPU().Renderer());
@@ -374,8 +373,7 @@ int main(int argc, char** argv) {
     Input::RegisterFactory<Input::ButtonDevice>("sr", std::make_shared<ScriptButtonFactory>());
     Input::RegisterFactory<Input::TouchDevice>("sr", std::make_shared<ScriptTouchFactory>());
     for (int i = 0; i < Settings::NativeButton::NumButtons; ++i) {
-        Settings::values.current_input_profile.buttons[i] =
-            "engine:sr,code:" + std::to_string(i);
+        Settings::values.current_input_profile.buttons[i] = "engine:sr,code:" + std::to_string(i);
     }
     Settings::values.current_input_profile.touch_device = "engine:sr";
     for (const auto& module : Service::service_module_map) {
@@ -412,10 +410,11 @@ int main(int argc, char** argv) {
                 std::printf("state %u saved\n", slot);
             } else if (cmd == "pc") {
                 auto& core = system.GetRunningCore();
-                std::printf("pc=%08x lr=%08x sp=%08x frame=%llu ticks=%llu\n", core.GetPC(),
-                            core.GetReg(14), core.GetReg(13),
-                            static_cast<unsigned long long>(system.GPU().Renderer().GetCurrentFrame()),
-                            static_cast<unsigned long long>(system.CoreTiming().GetTicks()));
+                std::printf(
+                    "pc=%08x lr=%08x sp=%08x frame=%llu ticks=%llu\n", core.GetPC(),
+                    core.GetReg(14), core.GetReg(13),
+                    static_cast<unsigned long long>(system.GPU().Renderer().GetCurrentFrame()),
+                    static_cast<unsigned long long>(system.CoreTiming().GetTicks()));
             } else if (cmd == "mem") {
                 // mem <addr> <size> <path>: raw guest memory to a host file
                 std::string a, n, path;
@@ -423,7 +422,8 @@ int main(int argc, char** argv) {
                 const u32 addr = static_cast<u32>(std::stoul(a, nullptr, 0));
                 const u32 size = static_cast<u32>(std::stoul(n, nullptr, 0));
                 std::vector<u8> buf(size);
-                system.Memory().ReadBlock(*system.Kernel().GetCurrentProcess(), addr, buf.data(), size);
+                system.Memory().ReadBlock(*system.Kernel().GetCurrentProcess(), addr, buf.data(),
+                                          size);
                 FileUtil::IOFile f(path, "wb");
                 f.WriteBytes(buf.data(), buf.size());
             } else if (cmd == "hudbench") {
@@ -485,10 +485,12 @@ int main(int argc, char** argv) {
             } else if (cmd == "threads") {
                 for (u32 c = 0; c < 4; ++c) {
                     for (const auto& t : system.Kernel().GetThreadManager(c).GetThreadList()) {
-                        std::printf("core%u tid=%u status=%d pc=%08x lr=%08x prio=%u r0=%08x r4=%08x sp=%08x\n", c,
-                                    t->thread_id, static_cast<int>(t->status),
+                        std::printf("core%u tid=%u status=%d pc=%08x lr=%08x prio=%u r0=%08x "
+                                    "r4=%08x sp=%08x\n",
+                                    c, t->thread_id, static_cast<int>(t->status),
                                     t->context.cpu_registers[15], t->context.cpu_registers[14],
-                                    t->current_priority, t->context.cpu_registers[0], t->context.cpu_registers[4], t->context.cpu_registers[13]);
+                                    t->current_priority, t->context.cpu_registers[0],
+                                    t->context.cpu_registers[4], t->context.cpu_registers[13]);
                     }
                 }
             } else if (cmd == "run") {

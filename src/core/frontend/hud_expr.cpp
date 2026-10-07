@@ -2,11 +2,11 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <mutex>
-#include <algorithm>
-#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include "core/core.h"
@@ -352,38 +352,75 @@ struct Env {
         return out;
     }
     static std::string FoldSjis(u16 w) {
-        if (w >= 0x8260 && w <= 0x8279) return std::string(1, static_cast<char>('A' + (w - 0x8260)));
-        if (w >= 0x8281 && w <= 0x829A) return std::string(1, static_cast<char>('a' + (w - 0x8281)));
-        if (w >= 0x824F && w <= 0x8258) return std::string(1, static_cast<char>('0' + (w - 0x824F)));
+        if (w >= 0x8260 && w <= 0x8279)
+            return std::string(1, static_cast<char>('A' + (w - 0x8260)));
+        if (w >= 0x8281 && w <= 0x829A)
+            return std::string(1, static_cast<char>('a' + (w - 0x8281)));
+        if (w >= 0x824F && w <= 0x8258)
+            return std::string(1, static_cast<char>('0' + (w - 0x824F)));
         switch (w) {
-        case 0x8140: return " ";
-        case 0x8141: case 0x8143: return ",";
-        case 0x8142: case 0x8144: return ".";
-        case 0x8146: return ":";
-        case 0x8147: return ";";
-        case 0x8148: return "?";
-        case 0x8149: return "!";
-        case 0x815E: return "/";
-        case 0x8160: return "~";
-        case 0x8165: case 0x8166: return "'";
-        case 0x8167: case 0x8168: return "\"";
-        case 0x8169: return "(";
-        case 0x816A: return ")";
-        case 0x816D: return "[";
-        case 0x816E: return "]";
-        case 0x817B: return "+";
-        case 0x817C: return "-";
-        case 0x8181: return "=";
-        case 0x8183: return "<";
-        case 0x8184: return ">";
-        case 0x8190: return "$";
-        case 0x8193: return "%";
-        case 0x8194: return "#";
-        case 0x8195: return "&";
-        case 0x8196: return "*";
-        case 0x8197: return "@";
-        case 0x815B: case 0x815C: case 0x815D: return "-";
-        default: return "";
+        case 0x8140:
+            return " ";
+        case 0x8141:
+        case 0x8143:
+            return ",";
+        case 0x8142:
+        case 0x8144:
+            return ".";
+        case 0x8146:
+            return ":";
+        case 0x8147:
+            return ";";
+        case 0x8148:
+            return "?";
+        case 0x8149:
+            return "!";
+        case 0x815E:
+            return "/";
+        case 0x8160:
+            return "~";
+        case 0x8165:
+        case 0x8166:
+            return "'";
+        case 0x8167:
+        case 0x8168:
+            return "\"";
+        case 0x8169:
+            return "(";
+        case 0x816A:
+            return ")";
+        case 0x816D:
+            return "[";
+        case 0x816E:
+            return "]";
+        case 0x817B:
+            return "+";
+        case 0x817C:
+            return "-";
+        case 0x8181:
+            return "=";
+        case 0x8183:
+            return "<";
+        case 0x8184:
+            return ">";
+        case 0x8190:
+            return "$";
+        case 0x8193:
+            return "%";
+        case 0x8194:
+            return "#";
+        case 0x8195:
+            return "&";
+        case 0x8196:
+            return "*";
+        case 0x8197:
+            return "@";
+        case 0x815B:
+        case 0x815C:
+        case 0x815D:
+            return "-";
+        default:
+            return "";
         }
     }
     const std::vector<std::string>& Lines(const std::string& file) const {
@@ -413,11 +450,11 @@ struct Env {
 // code (see dist/screen_regions for the layout that uses them).
 
 namespace Smt4a {
-constexpr u32 SaveDataPtr = 0x0057F69C;    // -> save data block (party, stock, items, flags)
-constexpr u32 BattleTask = 0x005B3CE4;     // [[[BattleTask]+0x384]+0x2F8] = battle UI object
-constexpr u32 SkillDescText = 0x00638F88;  // current skill/item description (Shift-JIS)
+constexpr u32 SaveDataPtr = 0x0057F69C;   // -> save data block (party, stock, items, flags)
+constexpr u32 BattleTask = 0x005B3CE4;    // [[[BattleTask]+0x384]+0x2F8] = battle UI object
+constexpr u32 SkillDescText = 0x00638F88; // current skill/item description (Shift-JIS)
 constexpr u32 StockBase = 0xF4, StockStride = 0x12C, StockMax = 40;
-constexpr u32 NanashiRec = 0x90;           // Nanashi's skill block (same layout as stock)
+constexpr u32 NanashiRec = 0x90; // Nanashi's skill block (same layout as stock)
 
 u32 Save(const Env& e) {
     return static_cast<u32>(e.Read(SaveDataPtr, 4, false));
@@ -485,7 +522,7 @@ u32 Obj(const Env& e) {
     }
     return 0;
 }
-constexpr u32 BattleMgrPtr = 0x0057113C;  // -> battle manager; live unit records inside it
+constexpr u32 BattleMgrPtr = 0x0057113C; // -> battle manager; live unit records inside it
 constexpr u32 UnitBase = 0x200E6, UnitStride = 0x408;
 // unit record (from its demon id field): +0 demon id (0 = Nanashi), +6 party slot, +0xF2 HP,
 // +0xF6 max HP, +0xFA MP, +0xFE max MP (u32), +0x114 level
@@ -678,25 +715,43 @@ Value Call(const ExprNode& n, const Env& env) {
     const auto& a = n.args;
     auto arg = [&](size_t i) { return i < a.size() ? Num(*a[i], env) : 0; };
     auto argv = [&](size_t i) { return i < a.size() ? EvalNode(*a[i], env) : Value{}; };
-    if (f == "u8") return env.Read(static_cast<u32>(arg(0)), 1, false);
-    if (f == "s8") return env.Read(static_cast<u32>(arg(0)), 1, true);
-    if (f == "u16") return env.Read(static_cast<u32>(arg(0)), 2, false);
-    if (f == "s16") return env.Read(static_cast<u32>(arg(0)), 2, true);
-    if (f == "u32") return env.Read(static_cast<u32>(arg(0)), 4, false);
-    if (f == "s32") return env.Read(static_cast<u32>(arg(0)), 4, true);
-    if (f == "time") return static_cast<s64>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-    if (f == "min") return std::min(arg(0), arg(1));
-    if (f == "max") return std::max(arg(0), arg(1));
-    if (f == "abs") return std::abs(arg(0));
-    if (f == "clamp") return std::clamp(arg(0), arg(1), std::max(arg(1), arg(2)));
-    if (f == "str") return Value(env.Ascii(static_cast<u32>(arg(0)), a.size() > 1 ? static_cast<u32>(arg(1)) : 128));
-    if (f == "sjis") return Value(env.Sjis(static_cast<u32>(arg(0)), static_cast<int>(arg(1))));
+    if (f == "u8")
+        return env.Read(static_cast<u32>(arg(0)), 1, false);
+    if (f == "s8")
+        return env.Read(static_cast<u32>(arg(0)), 1, true);
+    if (f == "u16")
+        return env.Read(static_cast<u32>(arg(0)), 2, false);
+    if (f == "s16")
+        return env.Read(static_cast<u32>(arg(0)), 2, true);
+    if (f == "u32")
+        return env.Read(static_cast<u32>(arg(0)), 4, false);
+    if (f == "s32")
+        return env.Read(static_cast<u32>(arg(0)), 4, true);
+    if (f == "time")
+        return static_cast<s64>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch())
+                                    .count());
+    if (f == "min")
+        return std::min(arg(0), arg(1));
+    if (f == "max")
+        return std::max(arg(0), arg(1));
+    if (f == "abs")
+        return std::abs(arg(0));
+    if (f == "clamp")
+        return std::clamp(arg(0), arg(1), std::max(arg(1), arg(2)));
+    if (f == "str")
+        return Value(
+            env.Ascii(static_cast<u32>(arg(0)), a.size() > 1 ? static_cast<u32>(arg(1)) : 128));
+    if (f == "sjis")
+        return Value(env.Sjis(static_cast<u32>(arg(0)), static_cast<int>(arg(1))));
     if (f == "lookup") {
         const auto& lines = env.Lines(argv(0).Text());
         const s64 i = arg(1);
-        return Value(i >= 0 && i < static_cast<s64>(lines.size()) ? lines[static_cast<size_t>(i)] : std::string{});
+        return Value(i >= 0 && i < static_cast<s64>(lines.size()) ? lines[static_cast<size_t>(i)]
+                                                                  : std::string{});
     }
-    if (f == "field") return Value(env.Field(argv(0).Text(), arg(1), static_cast<int>(arg(2))));
+    if (f == "field")
+        return Value(env.Field(argv(0).Text(), arg(1), static_cast<int>(arg(2))));
     if (f == "recent") {
         // true while arg0 is true and for arg1 ms after it last was (smooths brief state flips)
         static std::mutex m;
@@ -747,7 +802,8 @@ Value Call(const ExprNode& n, const Env& env) {
         }
         return (t.t != std::chrono::steady_clock::time_point{} && now - t.t < window) ? t.accum : 0;
     }
-    if (f == "has") return static_cast<s64>(argv(0).Text().find(argv(1).Text()) != std::string::npos);
+    if (f == "has")
+        return static_cast<s64>(argv(0).Text().find(argv(1).Text()) != std::string::npos);
     if (f == "pix") {
         // bottom-screen pixel 0xRRGGBB (sampled by the renderer)
         const u32 x = static_cast<u32>(std::clamp<s64>(arg(0), 0, 319));
@@ -755,11 +811,15 @@ Value Call(const ExprNode& n, const Env& env) {
         Probes::Instance().Request(x, y);
         return static_cast<s64>(Probes::Instance().Get(x, y));
     }
-    if (f == "len") return static_cast<s64>(argv(0).Text().size());
+    if (f == "len")
+        return static_cast<s64>(argv(0).Text().size());
     // --- SMT4A -------------------------------------------------------------------------------
-    if (f == "smt4a_save") return Smt4a::Save(env);
-    if (f == "smt4a_obj") return Smt4a::Obj(env);
-    if (f == "smt4a_rec") return Smt4a::Rec(env, arg(0));
+    if (f == "smt4a_save")
+        return Smt4a::Save(env);
+    if (f == "smt4a_obj")
+        return Smt4a::Obj(env);
+    if (f == "smt4a_rec")
+        return Smt4a::Rec(env, arg(0));
     if (f == "smt4a_prec") {
         // party member k's stock record from the save alone (outside battle)
         const u32 save = Smt4a::Save(env);
@@ -775,12 +835,18 @@ Value Call(const ExprNode& n, const Env& env) {
         }
         return 0;
     }
-    if (f == "smt4a_hp") return Smt4a::Stat(env, arg(0), 0);
-    if (f == "smt4a_mp") return Smt4a::Stat(env, arg(0), 1);
-    if (f == "smt4a_maxhp") return Smt4a::Stat(env, arg(0), 2);
-    if (f == "smt4a_maxmp") return Smt4a::Stat(env, arg(0), 3);
-    if (f == "smt4a_level") return Smt4a::Stat(env, arg(0), 4);
-    if (f == "smt4a_unit") return Smt4a::Unit(env, arg(0));
+    if (f == "smt4a_hp")
+        return Smt4a::Stat(env, arg(0), 0);
+    if (f == "smt4a_mp")
+        return Smt4a::Stat(env, arg(0), 1);
+    if (f == "smt4a_maxhp")
+        return Smt4a::Stat(env, arg(0), 2);
+    if (f == "smt4a_maxmp")
+        return Smt4a::Stat(env, arg(0), 3);
+    if (f == "smt4a_level")
+        return Smt4a::Stat(env, arg(0), 4);
+    if (f == "smt4a_unit")
+        return Smt4a::Unit(env, arg(0));
     if (f == "smt4a_demon") {
         if (arg(0) > 0 && Smt4a::Unit(env, arg(0))) {
             const s64 id = Smt4a::UnitDemon(env, arg(0));
@@ -789,18 +855,24 @@ Value Call(const ExprNode& n, const Env& env) {
         const u32 r = arg(0) <= 0 ? 0 : Smt4a::Rec(env, arg(0));
         return r ? env.Read(r + 0x62, 2, false) : -1;
     }
-    if (f == "smt4a_entry") return Smt4a::Entry(env, arg(0), arg(1));
-    if (f == "smt4a_entries") return Smt4a::Entries(env, arg(0));
-    if (f == "smt4a_cost") return Smt4a::Cost(env, arg(0), arg(1));
+    if (f == "smt4a_entry")
+        return Smt4a::Entry(env, arg(0), arg(1));
+    if (f == "smt4a_entries")
+        return Smt4a::Entries(env, arg(0));
+    if (f == "smt4a_cost")
+        return Smt4a::Cost(env, arg(0), arg(1));
     if (f == "smt4a_skillname") {
         const s64 id = arg(0);
-        if (id == -1) return Value(std::string("Attack"));
-        if (id == -2) return Value(std::string("Shoot"));
+        if (id == -1)
+            return Value(std::string("Attack"));
+        if (id == -2)
+            return Value(std::string("Shoot"));
         return Value(env.Field("smt4a_skills.txt", id, 1));
     }
     if (f == "smt4a_skillicon") {
         const s64 id = arg(0);
-        if (id < 0) return id == -1 ? 1 : 3; // Attack: phys, Shoot: gun
+        if (id < 0)
+            return id == -1 ? 1 : 3; // Attack: phys, Shoot: gun
         const std::string s = env.Field("smt4a_skills.txt", id, 4);
         return s.empty() ? 0 : std::stoll(s);
     }
@@ -809,17 +881,22 @@ Value Call(const ExprNode& n, const Env& env) {
         const s64 i = arg(1);
         return i >= 0 && i < static_cast<s64>(cmds.size()) ? cmds[static_cast<size_t>(i)] : -1;
     }
-    if (f == "smt4a_cmdcount") return static_cast<s64>(Smt4a::Commands(env, arg(0)).size());
+    if (f == "smt4a_cmdcount")
+        return static_cast<s64>(Smt4a::Commands(env, arg(0)).size());
     if (f == "smt4a_item") {
         const u32 obj = Smt4a::Obj(env);
         return obj ? env.Read(obj + 0x96C + static_cast<u32>(arg(0)) * 2, 2, false) : 0;
     }
-    if (f == "smt4a_itemcount") return Smt4a::ItemCount(env, arg(0));
-    if (f == "smt4a_itemname") return Value(env.Field("smt4a_items.txt", arg(0), 0));
-    if (f == "smt4a_skilldesc") return Value(env.Sjis(Smt4a::SkillDescText, static_cast<int>(arg(0))));
+    if (f == "smt4a_itemcount")
+        return Smt4a::ItemCount(env, arg(0));
+    if (f == "smt4a_itemname")
+        return Value(env.Field("smt4a_items.txt", arg(0), 0));
+    if (f == "smt4a_skilldesc")
+        return Value(env.Sjis(Smt4a::SkillDescText, static_cast<int>(arg(0))));
     if (f == "smt4a_cmddesc") {
         const u32 obj = Smt4a::Obj(env);
-        return Value(obj ? env.Ascii(obj + 0x11370 + static_cast<u32>(arg(0)) * 0x40, 64) : std::string{});
+        return Value(obj ? env.Ascii(obj + 0x11370 + static_cast<u32>(arg(0)) * 0x40, 64)
+                         : std::string{});
     }
     throw std::runtime_error("unknown function " + f);
 }
@@ -856,27 +933,45 @@ Value EvalNode(const ExprNode& n, const Env& env) {
         const Value a = EvalNode(*n.args[0], env);
         const Value b = EvalNode(*n.args[1], env);
         if (a.is_str || b.is_str) {
-            if (op == "+") return Value(a.Text() + b.Text());
-            if (op == "==") return static_cast<s64>(a.Text() == b.Text());
-            if (op == "!=") return static_cast<s64>(a.Text() != b.Text());
+            if (op == "+")
+                return Value(a.Text() + b.Text());
+            if (op == "==")
+                return static_cast<s64>(a.Text() == b.Text());
+            if (op == "!=")
+                return static_cast<s64>(a.Text() != b.Text());
             return Value{};
         }
         const s64 x = a.n, y = b.n;
-        if (op == "+") return x + y;
-        if (op == "-") return x - y;
-        if (op == "*") return x * y;
-        if (op == "/") return y ? x / y : 0;
-        if (op == "%") return y ? x % y : 0;
-        if (op == "==") return static_cast<s64>(x == y);
-        if (op == "!=") return static_cast<s64>(x != y);
-        if (op == "<") return static_cast<s64>(x < y);
-        if (op == ">") return static_cast<s64>(x > y);
-        if (op == "<=") return static_cast<s64>(x <= y);
-        if (op == ">=") return static_cast<s64>(x >= y);
-        if (op == "&") return x & y;
-        if (op == "|") return x | y;
-        if (op == "<<") return x << (y & 63);
-        if (op == ">>") return x >> (y & 63);
+        if (op == "+")
+            return x + y;
+        if (op == "-")
+            return x - y;
+        if (op == "*")
+            return x * y;
+        if (op == "/")
+            return y ? x / y : 0;
+        if (op == "%")
+            return y ? x % y : 0;
+        if (op == "==")
+            return static_cast<s64>(x == y);
+        if (op == "!=")
+            return static_cast<s64>(x != y);
+        if (op == "<")
+            return static_cast<s64>(x < y);
+        if (op == ">")
+            return static_cast<s64>(x > y);
+        if (op == "<=")
+            return static_cast<s64>(x <= y);
+        if (op == ">=")
+            return static_cast<s64>(x >= y);
+        if (op == "&")
+            return x & y;
+        if (op == "|")
+            return x | y;
+        if (op == "<<")
+            return x << (y & 63);
+        if (op == ">>")
+            return x >> (y & 63);
         return Value{};
     }
     }

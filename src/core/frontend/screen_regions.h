@@ -109,7 +109,9 @@ public:
     std::string StatusText() const;
 
     /// Recorder (layout research): true when the renderer should hand over the bottom screen.
-    bool WantsBottomCapture() const { return capture_pending.load(); }
+    bool WantsBottomCapture() const {
+        return capture_pending.load();
+    }
     /// Renderer hands over the bottom screen as 320x240 RGB8 (top-left origin).
     void SetBottomCapture(std::vector<u8> rgb);
 
@@ -175,7 +177,6 @@ private:
     bool capture_ready = false;
     void WriteRecord(Core::System& system, const std::string& profile);
     void EvaluateRegions(Core::System& system);
-
 };
 
 } // namespace ScreenRegions

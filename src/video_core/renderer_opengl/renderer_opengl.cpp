@@ -2,14 +2,14 @@
 // Licensed under GPLv2 or any later version
 // Refer to the misc/licenses/gplv2.txt file included.
 
+#include <algorithm>
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
 #include "core/core.h"
-#include <algorithm>
 #include "core/frontend/emu_window.h"
-#include "core/frontend/screen_regions.h"
 #include "core/frontend/framebuffer_layout.h"
+#include "core/frontend/screen_regions.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/renderer_opengl/gl_state.h"
@@ -829,10 +829,14 @@ void RendererOpenGL::ReadProbes() {
             const float s1 = tc.bottom + (tc.top - tc.bottom) * ((g.y + g.h) / 240.0f);
             const float t0 = tc.left + (tc.right - tc.left) * (g.x / 320.0f);
             const float t1 = tc.left + (tc.right - tc.left) * ((g.x + g.w) / 320.0f);
-            const GLint bx0 = std::clamp(static_cast<GLint>(std::min(s0, s1) * tex_w) - 1, 0, tex_w - 1);
-            const GLint bx1 = std::clamp(static_cast<GLint>(std::max(s0, s1) * tex_w) + 1, 0, tex_w - 1);
-            const GLint by0 = std::clamp(static_cast<GLint>(std::min(t0, t1) * tex_h) - 1, 0, tex_h - 1);
-            const GLint by1 = std::clamp(static_cast<GLint>(std::max(t0, t1) * tex_h) + 1, 0, tex_h - 1);
+            const GLint bx0 =
+                std::clamp(static_cast<GLint>(std::min(s0, s1) * tex_w) - 1, 0, tex_w - 1);
+            const GLint bx1 =
+                std::clamp(static_cast<GLint>(std::max(s0, s1) * tex_w) + 1, 0, tex_w - 1);
+            const GLint by0 =
+                std::clamp(static_cast<GLint>(std::min(t0, t1) * tex_h) - 1, 0, tex_h - 1);
+            const GLint by1 =
+                std::clamp(static_cast<GLint>(std::max(t0, t1) * tex_h) + 1, 0, tex_h - 1);
             const GLint bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
             std::vector<u8> box(static_cast<size_t>(bw) * bh * 4);
             glPixelStorei(GL_PACK_ALIGNMENT, 1);
