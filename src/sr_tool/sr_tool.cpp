@@ -455,6 +455,36 @@ int main(int argc, char** argv) {
                 std::string path;
                 in >> path;
                 Dump(system, path);
+            } else if (cmd == "film") {
+                // film <prefix> <count> <step>: every <step> frames write both screens plus the
+                // battle object block and party units (small, for watching whole turns)
+                std::string prefix;
+                u64 count = 0, step = 1;
+                in >> prefix >> count >> step;
+                auto* sw = dynamic_cast<SwRenderer::RendererSoftware*>(&system.GPU().Renderer());
+                auto process = system.Kernel().GetCurrentProcess();
+                for (u64 k = 0; k < count; ++k) {
+                    RunFrames(system, step);
+                    std::vector<u8> out;
+                    if (sw) {
+                        PutScreen(out, sw->Screen(VideoCore::ScreenId::Bottom));
+                        PutScreen(out, sw->Screen(VideoCore::ScreenId::TopLeft));
+                    }
+                    auto block = [&](u32 va, u32 size) {
+                        const size_t at = out.size();
+                        out.resize(at + size);
+                        if (process && system.Memory().IsValidVirtualAddress(*process, va)) {
+                            system.Memory().ReadBlock(*process, va, out.data() + at, size);
+                        }
+                    };
+                    block(0x08650000, 0x12000);
+                    block(0x0057113C, 4);
+                    block(0x085F8E66, 4 * 0x408);
+                    FileUtil::IOFile f(fmt::format("{}{:04}.bin", prefix, k), "wb");
+                    f.WriteBytes(out.data(), out.size());
+                }
+                std::printf("filmed %llu\n", static_cast<unsigned long long>(count));
+                std::fflush(stdout);
             } else if (cmd == "w8" || cmd == "w16" || cmd == "w32") {
                 std::string a, v;
                 in >> a >> v;
